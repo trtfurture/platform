@@ -20,7 +20,7 @@
       <div class="sidebar-ad"><span class="eyebrow">CAMPUS LIVING</span><h3>Looking for a place to stay?</h3><p>Discover hostels and rentals near campuses.</p><a href="/campus-living">Explore accommodation </a></div>
     </aside>
     <section class="directory-results"><div class="results-top"><div><strong>{{ schools|length }}</strong> institution{{ ('' if schools|length==1 else 's') }} found</div><span>Sponsored placements are labelled</span></div>
-      {% if schools|length %}<div class="school-grid directory-grid">{% for school in schools %}{% include 'partials/school-card.html' %}{% endfor %}</div>{% else %}<div class="empty-state"><span>⌕</span><h3>No matching institutions yet</h3><p>Try a different county, category or search term. You can also request an institution to be added.</p><a class="button button-outline" href="/advertise">Add an institution</a></div>{% endif %}
+      {% if schools|length %}<div class="school-grid directory-grid">{% for school in schools %}{% include 'partials/school-card.html' %}{% endfor %}</div>{% else %}<div class="empty-state"><h3>No matching institutions yet</h3><p>Try a different county, category or search term. You can also request an institution to be added.</p><a class="button button-outline" href="/advertise">Add an institution</a></div>{% endif %}
       <div class="results-note">Institution details can change. Please contact the institution directly to confirm admissions, fees and availability.</div>
     </section>
   </section>

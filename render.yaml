@@ -1,20 +1,12 @@
 services:
   - type: web
-    name: schools-ke-platform
+    name: schoolskenya
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 120
     healthCheckPath: /healthz
     envVars:
-      - key: FLASK_ENV
-        value: production
-      - key: DATA_DIR
-        value: /var/data
-      - key: PUBLIC_SITE_URL
-        value: https://schools.co.ke
-      - key: SIGNATURE_QR_URL
-        value: https://schools.co.ke
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD

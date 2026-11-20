@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" role="img" aria-label="Flag of Kenya">
+<rect width="600" height="400" fill="#fff"/>
+<rect y="0" width="600" height="118" fill="#000"/>
+<rect y="118" width="600" height="14" fill="#fff"/>
+<rect y="132" width="600" height="136" fill="#bb0000"/>
+<rect y="268" width="600" height="14" fill="#fff"/>
+<rect y="282" width="600" height="118" fill="#006600"/>
+<g transform="translate(300 200)" stroke="#111" stroke-linecap="round" stroke-linejoin="round">
+ <g fill="none" stroke-width="8">
+  <path d="M-11 -100 L-86 105 M11 -100 L86 105" stroke="#fff"/>
+  <path d="M-11 -100 L-86 105 M11 -100 L86 105" stroke-width="3"/>
+  <path d="M-86 105 l-7 -23 m7 23 l17 -17 M86 105 l7 -23 m-7 23 l-17 -17" stroke="#fff"/>
+ </g>
+ <path d="M0 -104 C-42 -65 -49 62 0 104 C49 62 42 -65 0 -104Z" fill="#fff" stroke-width="7"/>
+ <path d="M0 -91 C-28 -55 -34 54 0 91 C34 54 28 -55 0 -91Z" fill="#bb0000" stroke-width="4"/>
+ <path d="M0 -91 V91 M-23 -64 L23 64 M23 -64 L-23 64" fill="none" stroke-width="7"/>
+ <path d="M-11 -100 L-86 105 M11 -100 L86 105" fill="none" stroke="#fff" stroke-width="3"/>
+</g>
+</svg>

@@ -1,8 +1,9 @@
-import os, re, json, hmac, hashlib, secrets, sqlite3, shutil, time, threading, zipfile
+import os, re, json, hmac, secrets, sqlite3, shutil, time, threading, zipfile
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
-from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, send_file, abort, make_response
+from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, send_file, abort, make_response, has_request_context
 from flask_session import Session
 from dotenv import load_dotenv
 from flask_limiter import Limiter
@@ -14,28 +15,56 @@ from io import BytesIO
 
 BASE=Path(__file__).resolve().parent
 load_dotenv(BASE/'.env')
-DATA=Path(os.environ.get('DATA_DIR', BASE/'storage')).resolve(); UPLOAD=DATA/'uploads'; BACKUP=DATA/'backups'
+PROD=os.environ.get('RENDER')=='true' or bool(os.environ.get('RENDER_EXTERNAL_URL')) or os.environ.get('FLASK_ENV')=='production'
+DATA_DEFAULT='/var/data' if PROD else str(BASE/'storage')
+DATA=Path(DATA_DEFAULT).resolve(); UPLOAD=DATA/'uploads'; BACKUP=DATA/'backups'
 for p in (DATA,UPLOAD,BACKUP): p.mkdir(parents=True,exist_ok=True)
-PORT=int(os.environ.get('PORT','10000')); PROD=os.environ.get('FLASK_ENV')=='production' or os.environ.get('RENDER')=='true'
-SITE=(os.environ.get('PUBLIC_SITE_URL') or f'http://localhost:{PORT}').rstrip('/')
-if PROD:
- for key in ('ADMIN_USERNAME','ADMIN_PASSWORD'):
-  if not os.environ.get(key): raise RuntimeError(f'Missing required Render environment variable: {key}')
+PORT=int(os.environ.get('PORT','10000'))
+SITE=(os.environ.get('RENDER_EXTERNAL_URL') or ('https://schoolskenya.onrender.com' if PROD else f'http://localhost:{PORT}')).rstrip('/')
+ADMIN_USERNAME=os.environ.get('ADMIN_USERNAME','admin')
+ADMIN_PASSWORD=os.environ.get('ADMIN_PASSWORD','')
+if PROD and (not ADMIN_USERNAME or not ADMIN_PASSWORD):
+ raise RuntimeError('Set ADMIN_USERNAME and ADMIN_PASSWORD in Render environment variables.')
+ADMIN_PASSWORD_HASH=bcrypt.hashpw(ADMIN_PASSWORD.encode(),bcrypt.gensalt()) if ADMIN_PASSWORD else None
+
+def load_persistent_session_key(path):
+ key_path=path/'.schools-session-key'
+ try:
+  fd=os.open(str(key_path),os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+  key=secrets.token_bytes(64)
+  with os.fdopen(fd,'wb') as handle:
+   handle.write(key); handle.flush(); os.fsync(handle.fileno())
+  return key
+ except FileExistsError:
+  key=key_path.read_bytes()
+  if len(key)<32:
+   raise RuntimeError('The stored session key is invalid. Keep the Render persistent disk attached and restore the key file.')
+  return key
 
 app=Flask(__name__,static_folder='static',static_url_path='')
+def current_site():
+ return request.host_url.rstrip('/') if has_request_context() else SITE
 app.wsgi_app=ProxyFix(app.wsgi_app,x_for=1,x_proto=1,x_host=1)
-# Keep Render's secret-variable setup to ADMIN_USERNAME and ADMIN_PASSWORD only.
-# Derive a separate session-signing key from the admin password; changing the
-# password will invalidate existing admin sessions, which is expected.
-_admin_password_for_key=os.environ.get('ADMIN_PASSWORD','')
-app.secret_key=hashlib.sha256(('schools.co.ke-session-key:'+_admin_password_for_key).encode('utf-8')).hexdigest() if _admin_password_for_key else 'development-only-change-this-secret-before-deploying-123456789'
-app.config.update(SESSION_TYPE='filesystem',SESSION_FILE_DIR=str(DATA/'flask_sessions'),SESSION_PERMANENT=True,PERMANENT_SESSION_LIFETIME=timedelta(hours=8),SESSION_COOKIE_NAME='schools.admin',SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=PROD,MAX_CONTENT_LENGTH=50*1024*1024)
+app.secret_key=load_persistent_session_key(DATA)
+app.config.update(SESSION_TYPE='filesystem',SESSION_FILE_DIR=str(DATA/'flask_sessions'),SESSION_PERMANENT=True,PERMANENT_SESSION_LIFETIME=timedelta(hours=8),SESSION_COOKIE_NAME='schools.admin',SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=PROD,SESSION_USE_SIGNER=True,MAX_CONTENT_LENGTH=50*1024*1024)
 Path(app.config['SESSION_FILE_DIR']).mkdir(parents=True,exist_ok=True)
 Session(app)
 limiter=Limiter(get_remote_address,app=app,default_limits=[])
 DB=DATA/'schools.sqlite'
+@contextmanager
 def conn():
- c=sqlite3.connect(DB,timeout=15); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); c.execute('PRAGMA busy_timeout=5000'); return c
+ c=sqlite3.connect(DB,timeout=15)
+ c.row_factory=sqlite3.Row
+ c.execute('PRAGMA foreign_keys=ON')
+ c.execute('PRAGMA busy_timeout=5000')
+ try:
+  yield c
+  c.commit()
+ except Exception:
+  c.rollback()
+  raise
+ finally:
+  c.close()
 SCHEMA=r'''
   CREATE TABLE IF NOT EXISTS schools (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,8 +86,6 @@ SCHEMA=r'''
     description TEXT DEFAULT '',
     logo_path TEXT DEFAULT '',
     cover_path TEXT DEFAULT '',
-    image_credit TEXT DEFAULT '',
-    image_source_url TEXT DEFAULT '',
     video_url TEXT DEFAULT '',
     trust_status TEXT NOT NULL DEFAULT 'unverified',
     promotion_tier TEXT NOT NULL DEFAULT 'none',
@@ -139,9 +166,6 @@ with conn() as c:
  for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'")]:
   cols=[r['name'] for r in c.execute(f'PRAGMA table_info({table})')]
   if col not in cols: c.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
- for col,definition in [('image_credit',"TEXT DEFAULT ''"),('image_source_url',"TEXT DEFAULT ''")]:
-  cols=[r['name'] for r in c.execute('PRAGMA table_info(schools)')]
-  if col not in cols: c.execute(f'ALTER TABLE schools ADD COLUMN {col} {definition}')
  c.executescript("CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at);")
 
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -167,100 +191,105 @@ def format_date(v):
  except:return ''
 def join_nonempty(items,sep=', '):return sep.join(str(x) for x in items if x)
 def filter_nonempty(items):return [x for x in items if x]
-def institution_initials(name):
- words=[w for w in re.split(r'\s+',str(name or '').strip()) if w]
- return ''.join(w[0] for w in words[:2]).upper() or 'ED'
-app.jinja_env.globals.update(formatDate=format_date,join_nonempty=join_nonempty,filter_nonempty=filter_nonempty,institutionInitials=institution_initials,phone_digits=lambda value: re.sub(r'[^0-9]','',str(value or '')),current_year=datetime.now().year)
 COUNTIES=['Baringo','Bomet','Bungoma','Busia','Elgeyo-Marakwet','Embu','Garissa','Homa Bay','Isiolo','Kajiado','Kakamega','Kericho','Kiambu','Kilifi','Kirinyaga','Kisii','Kisumu','Kitui','Kwale','Laikipia','Lamu','Machakos','Makueni','Mandera','Marsabit','Meru','Migori','Mombasa','Murang’a','Nairobi','Nakuru','Nandi','Narok','Nyamira','Nyandarua','Nyeri','Samburu','Siaya','Taita-Taveta','Tana River','Tharaka-Nithi','Trans Nzoia','Turkana','Uasin Gishu','Vihiga','Wajir','West Pokot']
-def directory_seed(name, category, ownership='', county='', town='', levels='', accommodation='', gender='', curriculum='', website='', description='', source_note=''):
- slug=slugify(name)
- if not description:
-  description=f"Public-information directory profile for {name}. Confirm current admissions, programmes, fees and requirements directly with the institution."
- if not source_note:
-  source_note="Public-information directory profile. The institution has not yet claimed or confirmed this profile on SCHOOLS."
- return (name,slug,category,ownership,levels or ('University' if category=='university' else ('College / TVET' if category=='college' else 'Secondary')),county,town,accommodation,gender,curriculum,website,description,source_note)
 
-SEED=[]
-# Established schools: directory information only; not claimed or endorsed.
-SCHOOL_ROWS=[
-('Alliance High School','Public','Kiambu','Kikuyu','Boarding','Boys','https://www.alliancehighschool.ac.ke/'),
-('Strathmore School','Private','Nairobi','Lavington','Day','','https://www.strathmore.ac.ke/'),
-('Kenya High School','Public','Nairobi','Kileleshwa','Boarding','Girls',''),
-('Nairobi School','Public','Nairobi','Nairobi','Boarding','Boys',''),
-("Mang'u High School",'Public','Kiambu','Thika','Boarding','Boys','https://www.manguhigh.com/'),
-('Lenana School','Public','Nairobi','Dagoretti','Boarding','Boys',''),
-('Pangani Girls School','Public','Nairobi','Pangani','Boarding','Girls',''),
-('Moi Girls School Nairobi','Public','Nairobi','Nairobi','Boarding','Girls',''),
-('Maryhill Girls High School','Public','Kiambu','Thika','Boarding','Girls',''),
-('Loreto High School Limuru','Private','Kiambu','Limuru','Boarding','Girls',''),
-('Kapsabet Boys High School','Public','Nandi','Kapsabet','Boarding','Boys',''),
-('Maseno School','Public','Kisumu','Maseno','Boarding','Boys',''),
-('Maranda High School','Public','Siaya','Bondo','Boarding','Boys',''),
-('Friends School Kamusinga','Public','Bungoma','Kimilili','Boarding','Boys',''),
-('Starehe Boys Centre and School','Private','Nairobi','Nairobi','Boarding','Boys',''),
-('Brookhouse School','Private','Nairobi','Karen','Day','Mixed',''),
-('Braeburn School','Private','Nairobi','Garden Estate','Day','Mixed',''),
-('Aga Khan Academy Nairobi','Private','Nairobi','Nairobi','Day','Mixed',''),
-('Riara School','Private','Nairobi','Riara Road','Day','Mixed',''),
-('Light International School','Private','Nairobi','Nairobi','Day','Mixed',''),
-('Precious Blood Riruta','Private','Nairobi','Riruta','Boarding','Girls',''),
-('Bishop Gatimu Ngandu Girls High School','Public','Nyeri','Nyeri','Boarding','Girls',''),
-('Nakuru High School','Public','Nakuru','Nakuru','Boarding','Boys',''),
-('Moi High School Kabarak','Private','Nakuru','Kabarak','Boarding','Mixed','')]
-for name,own,county,town,accom,gender,web in SCHOOL_ROWS:
- SEED.append(directory_seed(name,'school',own,county,town,'Secondary',accom,gender,'Secondary education',web))
-# Major public TVET and specialist colleges.
-COLLEGE_ROWS=[
-('Kenya Utalii College','Nairobi','Nairobi','Hospitality and tourism training','https://utalii.ac.ke/'),
-('Kenya Medical Training College','Nairobi','Nairobi','Medical training','https://kmtc.ac.ke/'),
-('The Nairobi National Polytechnic','Nairobi','Nairobi','Technical and vocational training',''),
-('Kabete National Polytechnic','Nairobi','Kabete','Technical and vocational training',''),
-('Kenya Coast National Polytechnic','Mombasa','Mombasa','Technical and vocational training',''),
-('The Kisumu National Polytechnic','Kisumu','Kisumu','Technical and vocational training',''),
-('The Eldoret National Polytechnic','Uasin Gishu','Eldoret','Technical and vocational training',''),
-('Rift Valley Institute of Science and Technology','Nakuru','Nakuru','Technical and vocational training',''),
-('Nyeri National Polytechnic','Nyeri','Nyeri','Technical and vocational training',''),
-('Meru National Polytechnic','Meru','Meru','Technical and vocational training',''),
-('Sigalagala National Polytechnic','Kakamega','Sigalagala','Technical and vocational training',''),
-('Kisii National Polytechnic','Kisii','Kisii','Technical and vocational training',''),
-('Kenya Institute of Mass Communication','Nairobi','Nairobi','Media and communication training',''),
-('Kenya Institute of Special Education','Nairobi','Nairobi','Special needs education training','https://kise.ac.ke/')]
-for name,county,town,focus,web in COLLEGE_ROWS:
- SEED.append(directory_seed(name,'college','Public',county,town,'College / TVET','', 'Mixed',focus,web))
-# CUE approved public/private chartered universities as at 5 November 2026.
-CUE_SOURCE='https://www.cue.or.ke/index.php?Itemid=511&download=294%3Aapproved-universities-15th-september-2026&id=81%3Aapproved-academic-programmes-dec-2023&option=com_phocadownload&view=category'
-CUE_NOTE='Listed in the Commission for University Education approved-universities publication dated 5 November 2026. This SCHOOLS profile is independent and is not operated or endorsed by CUE; confirm current programme accreditation directly.'
-PUBLIC_UNIVERSITIES=['University of Nairobi','Moi University','Kenyatta University','Egerton University','Jomo Kenyatta University of Agriculture and Technology','Maseno University','Masinde Muliro University of Science and Technology','Dedan Kimathi University of Technology','Chuka University','Technical University of Kenya','Technical University of Mombasa','Pwani University','Kisii University','University of Eldoret','Maasai Mara University','Jaramogi Oginga Odinga University of Science and Technology','Laikipia University','South Eastern Kenya University','Meru University of Science and Technology','Multimedia University of Kenya','University of Kabianga','Karatina University','Kibabii University','Rongo University','The Co-operative University of Kenya','Taita Taveta University',"Murang'a University of Technology",'University of Embu','Machakos University','Kirinyaga University','Garissa University','Alupe University','Kaimosi Friends University','Tom Mboya University','Tharaka University','Bomet University']
-PRIVATE_UNIVERSITIES=['University of Eastern Africa, Baraton','Catholic University of Eastern Africa','Daystar University','Scott Christian University','United States International University','Africa Nazarene University','Kenya Methodist University',"St. Paul's University",'Pan Africa Christian University','Strathmore University','Kabarak University','Mount Kenya University','Africa International University','Kenya Highlands Evangelical University','Great Lakes University of Kisumu','KCA University','Adventist University of Africa','KAG EAST University','Umma University','Presbyterian University of East Africa','Aga Khan University',"Kiriri Women's University of Science and Technology",'The East African University','Zetech University','Lukenya University','Management University of Africa','Tangaza University','Islamic University of Kenya','Riara University','Uzima University','Gretsa University','Amref International University','International Leadership University']
-for name in PUBLIC_UNIVERSITIES:
- SEED.append(directory_seed(name,'university','Public',levels='University',curriculum='Degree and postgraduate programmes',source_note=CUE_NOTE))
-for name in PRIVATE_UNIVERSITIES:
- SEED.append(directory_seed(name,'university','Private',levels='University',curriculum='Degree and postgraduate programmes',source_note=CUE_NOTE))
-for name,own in [('Turkana University College','Public'),('Koitaleel Samoei University College','Public'),('Mama Ngina University College','Public'),('Nyandarua University College','Public'),('Kabarnet University College','Public'),('Makueni University College','Public'),('Kerio Valley University College','Public'),('Hekima University College','Private'),('Marist International University College','Private')]:
- SEED.append(directory_seed(name,'college',own,levels='University constituent college',curriculum='University-level programmes',source_note=CUE_NOTE))
+# Real photographs with confirmed Creative Commons Attribution-ShareAlike licences.
+# Only records with the matching institution slug are eligible; no institution is added or recategorised.
+CC_BY_SA='https://creativecommons.org/licenses/by-sa/4.0/'
+def commons_file(filename):
+ from urllib.parse import quote
+ return 'https://commons.wikimedia.org/wiki/Special:FilePath/'+quote(filename,safe='')+'?width=1280'
+PHOTO_ASSETS={
+ 'alliance-high-school':[
+  {'url':'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/New_Complex_at_Alliance_High_School.jpg/1280px-New_Complex_at_Alliance_High_School.jpg','title':'New Complex at Alliance High School','author':'Hansie453','source':'https://commons.wikimedia.org/wiki/File:New_Complex_at_Alliance_High_School.jpg'},
+  {'url':'https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0f/Alliance_High_School_Administration_Block_-_Back_View.jpg/1280px-Alliance_High_School_Administration_Block_-_Back_View.jpg','title':'Alliance High School Administration Block, rear view','author':'NevilleOmangi','source':'https://commons.wikimedia.org/wiki/File:Alliance_High_School_Administration_Block_-_Back_View.jpg'}
+ ],
+ 'university-of-nairobi':[
+  {'url':'https://upload.wikimedia.org/wikipedia/commons/thumb/f/f3/University_of_Nairobi_Entrance.jpg/1280px-University_of_Nairobi_Entrance.jpg','title':'University of Nairobi Entrance','author':'EstherWikipedian','source':'https://commons.wikimedia.org/wiki/File:University_of_Nairobi_Entrance.jpg'},
+  {'url':'https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b6/University_of_Nairobi_Tower.jpg/1280px-University_of_Nairobi_Tower.jpg','title':'University of Nairobi Tower','author':'EstherWikipedian','source':'https://commons.wikimedia.org/wiki/File:University_of_Nairobi_Tower.jpg'},
+  {'url':'https://thumb.wikimedia.org/wikipedia/commons/thumb/2/28/University_of_Nairobi_Mahatma_Gandhi_Memorial_Library.jpg/1280px-University_of_Nairobi_Mahatma_Gandhi_Memorial_Library.jpg','title':'University of Nairobi Mahatma Gandhi Memorial Library','author':'EstherWikipedian','source':'https://commons.wikimedia.org/wiki/File:University_of_Nairobi_Mahatma_Gandhi_Memorial_Library.jpg'},
+  {'url':commons_file('University of Nairobi, Kenya.jpg'),'title':'University of Nairobi, outside view','author':'EstherWikipedian','source':'https://commons.wikimedia.org/wiki/File:University_of_Nairobi,_Kenya.jpg'}
+ ],
+ 'kenyatta-university':[
+  {'url':'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e7/Kenyatta_University_Entrance.jpg/1280px-Kenyatta_University_Entrance.jpg','title':'Kenyatta University Entrance','author':'Thorkild Tylleskar','source':'https://commons.wikimedia.org/wiki/File:Kenyatta_University_Entrance.jpg'},
+  {'url':'https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2f/KenyattaUnivAdmin.jpg/960px-KenyattaUnivAdmin.jpg','title':'Kenyatta University Central Administration Complex','author':'Thorkild Tylleskar','source':'https://commons.wikimedia.org/wiki/File:KenyattaUnivAdmin.jpg'},
+  {'url':'https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2b/KenyattaUnivLibrary.jpg/960px-KenyattaUnivLibrary.jpg','title':'Kenyatta University Library','author':'Thorkild Tylleskar','source':'https://commons.wikimedia.org/wiki/File:KenyattaUnivLibrary.jpg'},
+  {'url':'https://thumb.wikimedia.org/wikipedia/commons/thumb/7/7f/KenyattaUnivCampanile.jpg/960px-KenyattaUnivCampanile.jpg','title':'Kenyatta University Campanile','author':'Thorkild Tylleskar','source':'https://commons.wikimedia.org/wiki/File:KenyattaUnivCampanile.jpg'},
+  {'url':commons_file('KenyattaUnivComputerCentre.jpg'),'title':'Kenyatta University Computer Centre','author':'Thorkild Tylleskar','source':'https://commons.wikimedia.org/wiki/File:KenyattaUnivComputerCentre.jpg'}
+ ],
+ 'strathmore-university':[
+  {'url':commons_file('Strathmore-University-Management-science-building.jpg'),'title':'Strathmore University Management Science Building','author':'Strathmore University Kenya','source':'https://commons.wikimedia.org/wiki/File:Strathmore-University-Management-science-building.jpg'},
+  {'url':commons_file('Strathmore University Student Centre.jpg'),'title':'Strathmore University Student Centre','author':'Strathmore University Kenya','source':'https://commons.wikimedia.org/wiki/File:Strathmore_University_Student_Centre.jpg'},
+  {'url':commons_file('Strathmore University Library by night.jpg'),'title':'Strathmore University Library','author':'Strathmore University Kenya','source':'https://commons.wikimedia.org/wiki/File:Strathmore_University_Library_by_night.jpg'},
+  {'url':commons_file('Strathmore-University.jpg'),'title':'Strathmore University students walking to class','author':'Strathmore University Kenya','source':'https://commons.wikimedia.org/wiki/File:Strathmore-University.jpg'}
+ ],
+ 'mangu-high-school':[
+  {'url':'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/Mang%27u_High_School.png/500px-Mang%27u_High_School.png','title':"Mang'u High School administration block",'author':'Anthony Mudhoka','source':"https://commons.wikimedia.org/wiki/File:Mang%27u_High_School.png"},
+  {'url':'https://upload.wikimedia.org/wikipedia/commons/1/17/Mang%27uhigh.jpg','title':"Mang'u High School",'author':'Andygroove','source':"https://commons.wikimedia.org/wiki/File:Mang%27uhigh.jpg",'license':'Public domain','license_url':'https://commons.wikimedia.org/wiki/File:Mang%27uhigh.jpg'}
+ ],
+ 'kenya-high-school':[
+  {'url':'https://upload.wikimedia.org/wikipedia/commons/thumb/c/cb/The_Kenya_High_School_Main_Gate.jpg/1280px-The_Kenya_High_School_Main_Gate.jpg','title':'The Kenya High School Main Gate','author':'Lilly Stein','source':'https://commons.wikimedia.org/wiki/File:The_Kenya_High_School_Main_Gate.jpg'}
+ ],
+ 'kenya-medical-training-college-karen':[
+  {'url':commons_file('Kenya Medical Training College Karen Campus entrance.jpg'),'title':'Kenya Medical Training College Karen Campus entrance','author':'Sdkb','source':'https://commons.wikimedia.org/wiki/File:Kenya_Medical_Training_College_Karen_Campus_entrance.jpg'}
+ ],
+ 'jomo-kenyatta-university-of-agriculture-and-technology':[
+  {'url':commons_file('JKUAT-Main-Campus-Gate-A.jpg'),'title':'JKUAT Main Campus Gate A','author':'Onsomu','source':'https://commons.wikimedia.org/wiki/File:JKUAT-Main-Campus-Gate-A.jpg'}
+ ],
+ 'alupe-university':[
+  {'url':commons_file('Alupe University Administration Block.jpg'),'title':'Alupe University Administration Block','author':'Totibine','source':'https://commons.wikimedia.org/wiki/File:Alupe_University_Administration_Block.jpg'}
+ ],
+ 'maseno-school':[
+  {'url':commons_file('Maseno School Photo.jpg'),'title':'Maseno School group photograph beside the dining hall','author':'Ajwoga','source':'https://commons.wikimedia.org/wiki/File:Maseno_School_Photo.jpg','license':'CC BY-SA 3.0','license_url':'https://creativecommons.org/licenses/by-sa/3.0/'}
+ ]
+}
+HERO_PHOTO=PHOTO_ASSETS['university-of-nairobi'][0]
+PHOTO_CREDITS={item['url']:item for group in PHOTO_ASSETS.values() for item in group}
+def apply_real_photo_defaults():
+ # Remove the old generic/generated hero from every record, but keep all real user-uploaded photos.
+ # Add institution-specific licensed photos only to an exact matching existing slug.
+ with conn() as c:
+  rows=c.execute('SELECT id,slug,cover_path,photos_json FROM schools').fetchall()
+  for row in rows:
+   cover=(row['cover_path'] or '').strip()
+   raw=(row['photos_json'] or '').strip()
+   try:
+    gallery=json.loads(raw) if raw else []
+    if not isinstance(gallery,list): gallery=[]
+   except Exception:
+    gallery=[]
+   cleaned_gallery=[x for x in gallery if isinstance(x,str) and x.strip() and not (x.strip()=='/images/school-hero.webp' or x.strip().endswith('/school-hero.webp'))]
+   cover_is_placeholder=(not cover or cover=='/images/school-hero.webp' or cover.endswith('/school-hero.webp'))
+   assets=PHOTO_ASSETS.get(row['slug'],[])
+   if cover_is_placeholder:
+    cover=cleaned_gallery[0] if cleaned_gallery else (assets[0]['url'] if assets else '')
+   if not cleaned_gallery and assets:
+    cleaned_gallery=[item['url'] for item in assets]
+   new_gallery=json.dumps(cleaned_gallery,ensure_ascii=False)
+   if cover_is_placeholder or cover!=(row['cover_path'] or '').strip() or new_gallery!=(raw or '[]'):
+    c.execute('UPDATE schools SET cover_path=?,photos_json=? WHERE id=?',(cover,new_gallery,row['id']))
 
-# Add only missing records. Never overwrite profiles that an institution or admin has edited.
+def photo_attribution(url):
+ item=PHOTO_CREDITS.get(str(url or '').strip())
+ if not item:return None
+ result=dict(item)
+ result['licenseLabel']=item.get('license','CC BY-SA 4.0')
+ result['licenseUrl']=item.get('license_url',CC_BY_SA)
+ return result
+def institution_initials(name):
+ words=[x for x in re.split(r'\s+',str(name or '').strip()) if x]
+ if not words:return 'SC'
+ return ''.join(word[0] for word in words[:2]).upper()
+app.jinja_env.globals.update(formatDate=format_date,join_nonempty=join_nonempty,filter_nonempty=filter_nonempty,phone_digits=lambda value: re.sub(r'[^0-9]','',str(value or '')),current_year=datetime.now().year,photoAttribution=photo_attribution,institutionInitials=institution_initials)
+SEED=[('Alliance High School','alliance-high-school','school','Public','Secondary','Kiambu','Kikuyu','Boarding','Boys','Secondary education','https://www.alliancehighschool.ac.ke/','A recognised Kenyan secondary school in Kikuyu, Kiambu County. This directory profile is an introductory listing; contact the school directly for current admissions, fees and requirements.'),('Strathmore School','strathmore-school','school','Private','Primary, Junior, Secondary','Nairobi','Lavington','Day','','Contact institution for current curriculum details','https://www.strathmore.ac.ke/','A private school located in Lavington, Nairobi. Explore its official website for current school-life, admissions and transfer information.'),('University of Nairobi','university-of-nairobi','university','Public','University','Nairobi','Nairobi','','Mixed','Degree and postgraduate programmes','https://www.uonbi.ac.ke/','A public university based in Nairobi with multiple campuses and academic programmes. Visit the official website for current courses, admissions and campus information.'),('Kenyatta University','kenyatta-university','university','Public','University','Nairobi','Kahawa','','Mixed','Degree and postgraduate programmes','https://www.ku.ac.ke/','A public university whose main campus is in Kahawa, Nairobi County. Visit the official university website for current programmes, admissions and campus details.'),('Kenya Utalii College','kenya-utalii-college','college','Public','College / TVET','Nairobi','Off Thika Road','','Mixed','Hospitality and tourism training','https://utalii.ac.ke/','A hospitality and tourism training institution with its main campus off Thika Road in Nairobi. Visit the official website for current programmes, admissions and campus information.')]
 with conn() as c:
- for r in SEED:
-  name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc,source_note=r
-  if c.execute('SELECT 1 FROM schools WHERE slug=?',(slug,)).fetchone(): continue
-  t=now()
-  c.execute("""INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,website,description,trust_status,promotion_tier,status,source_note,is_seeded,posted_at,expires_at,last_renewed_at,created_at,updated_at)
-  VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'unverified','none','published',?,1,?,'',?,?,?)""",
-  (name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc,source_note,t,t,t,t))
- # Old auto-seeded "recognised" badges could be mistaken for institutional verification.
- c.execute("""UPDATE schools SET trust_status='unverified', source_note=CASE WHEN source_note='' OR source_note LIKE 'Recognised public-information%' THEN 'Public-information directory profile. The institution has not yet claimed or confirmed this profile on SCHOOLS.' ELSE source_note END WHERE is_seeded=1 AND trust_status='recognised'""")
- # Two real, directly attributed CC BY-SA 4.0 campus photographs from Wikimedia Commons.
- c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='alliance-high-school' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
- ('https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/New_Complex_at_Alliance_High_School.jpg/1280px-New_Complex_at_Alliance_High_School.jpg','Photo: Hansie453, “New Complex at Alliance High School” (2016), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:New_Complex_at_Alliance_High_School.jpg'))
- c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='kenya-high-school' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
- ('https://upload.wikimedia.org/wikipedia/commons/c/cb/The_Kenya_High_School_Main_Gate.jpg','Photo: Lilly Stein, “The Kenya High School Main Gate” (2017), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:The_Kenya_High_School_Main_Gate.jpg'))
- c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='mang-u-high-school' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
- ('https://upload.wikimedia.org/wikipedia/commons/e/e1/Mang%27u_High_School.png','Photo: Anthony Mudhoka, “Mang’u High School” (2018), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:Mang%27u_High_School.png'))
- c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='university-of-nairobi' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
- ('https://upload.wikimedia.org/wikipedia/commons/1/16/University_of_Nairobi%2C_Kenya.jpg','Photo: EstherWikipedian, “University of Nairobi, Kenya” (2023), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:University_of_Nairobi,_Kenya.jpg'))
- c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='kenyatta-university' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
- ('https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/KenyattaUnivAdmin.jpg/1280px-KenyattaUnivAdmin.jpg','Photo: Thorkild Tylleskar, “Kenyatta University Central Administration Complex” (2016), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:KenyattaUnivAdmin.jpg'))
+ if c.execute('SELECT COUNT(*) FROM schools').fetchone()[0]==0:
+  for r in SEED:
+   name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc=r; t=now()
+   c.execute("INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,website,description,trust_status,promotion_tier,status,source_note,is_seeded,posted_at,expires_at,last_renewed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'recognised','none','published',?,1,?,'',?,?,?)",(name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc,'Recognised public-information listing. The institution has not yet claimed or confirmed this profile on SCHOOLS.',t,t,t,t))
+
+apply_real_photo_defaults()
+
 
 def active_schools(where='',params=()):
  t=now()
@@ -277,16 +306,16 @@ def base_context():
  if not path.startswith('/admin') and path!='/':
   with conn() as c: rows=[dict(x) for x in c.execute("SELECT * FROM schools WHERE status='published' AND promotion_tier='vvip' AND promotion_expires_at>? AND (expires_at='' OR expires_at IS NULL OR expires_at>?) ORDER BY COALESCE(last_featured_at,'') ASC LIMIT 8",(t,t)).fetchall()]
   promos=feature_rotation(rows,3)
- qrurl=os.environ.get('SIGNATURE_QR_URL',SITE+'/?source=toror-signature-qr')
+ site=current_site(); qrurl=site+'/?source=toror-signature-qr'
  qr=qrcode.QRCode(box_size=3,border=1); qr.add_data(qrurl); qr.make(fit=True); im=qr.make_image(fill_color='#17324d',back_color='white'); bio=BytesIO(); im.save(bio,format='PNG')
  from base64 import b64encode
- return dict(siteName='SCHOOLS',siteUrl=SITE,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Discover Schools, Colleges & Universities in Kenya | SCHOOLS',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=SITE+('/' if path=='/' else path),pageImage=SITE+'/images/schools-icon-512.png',isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'SCHOOLS','url':SITE,'description':'Find and compare schools, colleges and universities across Kenya.','potentialAction':{'@type':'SearchAction','target':SITE+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
+ return dict(siteName='SCHOOLS',siteUrl=site,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Discover Schools, Colleges & Universities in Kenya | SCHOOLS',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=site+('/' if path=='/' else path),pageImage=HERO_PHOTO['url'],heroCredit=photo_attribution(HERO_PHOTO['url']),isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'SCHOOLS','url':site,'description':'Find and compare schools, colleges and universities across Kenya.','potentialAction':{'@type':'SearchAction','target':site+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
 def page(template,**kwargs):
  ctx=base_context(); ctx.update(kwargs)
  if template=='directory':
   ctx.setdefault('metaTitle', (kwargs.get('title') or 'Explore institutions')+' | SCHOOLS')
   ctx.setdefault('metaDescription', (kwargs.get('intro') or 'Explore schools, colleges and universities across Kenya.')+' Compare institution profiles, locations, programmes and contact information.')
-  ctx.setdefault('canonical', SITE+request.path)
+  ctx.setdefault('canonical', current_site()+request.path)
   if request.args: ctx['robots']='noindex,follow'
   if len(kwargs.get('schools',[]))<3 and request.path.startswith('/schools-in-'): ctx['robots']='noindex,follow'
  elif template=='advertise':
@@ -349,20 +378,7 @@ def health():
 def home():
  with conn() as c:
   counts={k:c.execute('SELECT COUNT(*) FROM schools WHERE status="published"'+(f' AND category="{cat}"' if cat else '')).fetchone()[0] for k,cat in [('allCount',''),('schoolCount','school'),('collegeCount','college'),('universityCount','university')]}
- featured=[]
- for category in ('school','college','university'):
-  rows=active_schools('AND category=?',[category])
-  if rows:
-   # Prefer an institution with a real credited photograph when selecting the first school card.
-   chosen=next((row for row in rows if row.get('cover_path') and (not row.get('is_seeded') or (row.get('image_credit') and row.get('image_source_url')))),rows[0])
-   featured.append(chosen)
- if len(featured)<4:
-  used={row['id'] for row in featured}
-  for row in active_schools():
-   if row['id'] not in used:
-    featured.append(row); used.add(row['id'])
-   if len(featured)>=4: break
- featured=feature_rotation(featured,4); vvip=feature_rotation(active_schools("AND promotion_tier='vvip' AND promotion_expires_at>?",[now()]),3)
+ featured=feature_rotation(active_schools(),4); vvip=feature_rotation(active_schools("AND promotion_tier='vvip' AND promotion_expires_at>?",[now()]),3)
  return page('home',featured=featured,vvip=vvip,counts=counts)
 @app.get('/schools')
 def schools():
@@ -407,18 +423,10 @@ def school_profile(slug):
   if not row or row['status']!='published' or (not row['is_seeded'] and row['expires_at'] and row['expires_at']<=t):abort(404)
   c.execute('UPDATE schools SET views=views+1 WHERE id=?',(row['id'],)); school=dict(row)
  related=active_schools('AND id<>? AND (county=? OR category=?)',[school['id'],school['county'],school['category']])[:4]
- cover=school.get('cover_path') or ''
- if school.get('is_seeded'):
-  # Seeded institution profiles show only photographs with explicit source and licence attribution.
-  photos=[cover] if cover and school.get('image_credit') and school.get('image_source_url') else []
- else:
-  try:photos=json.loads(school.get('photos_json') or '[]')
-  except:photos=[]
-  photos=[photo for photo in photos if isinstance(photo,str) and photo.strip() and '/images/school-hero.webp' not in photo]
-  if cover and '/images/school-hero.webp' not in cover and cover not in photos:photos.insert(0,cover)
- image_path=cover if cover and (not school.get('is_seeded') or (school.get('image_credit') and school.get('image_source_url'))) and '/images/school-hero.webp' not in cover else '/images/schools-icon-512.png'
- image_url=image_path if image_path.startswith(('http://','https://')) else SITE+image_path
- ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | SCHOOLS",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=SITE+'/school/'+slug,pageImage=image_url,school=school,related=related,photos=photos,enquirySent=request.args.get('enquiry')=='sent',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':SITE+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':image_url})
+ try:photos=json.loads(school.get('photos_json') or '[]')
+ except:photos=[]
+ if not photos and school.get('cover_path'):photos=[school['cover_path']]
+ ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | SCHOOLS",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=current_site()+'/school/'+slug,school=school,related=related,photos=photos,enquirySent=request.args.get('enquiry')=='sent',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':current_site()+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':(school.get('cover_path') if str(school.get('cover_path') or '').startswith(('http://','https://')) else current_site()+(school.get('cover_path') or '')) or HERO_PHOTO['url']})
  return render_template('school.html',**ctx)
 @app.post('/school/<slug>/enquiry')
 @limiter.limit('8 per hour')
@@ -484,9 +492,9 @@ def admin_login():
 @app.post('/admin/login')
 @limiter.limit('8 per 15 minutes')
 def admin_login_post():
- username=safe(request.form.get('username'),120); password=request.form.get('password',''); expected=os.environ.get('ADMIN_USERNAME','admin'); configured=os.environ.get('ADMIN_PASSWORD','')
- valid_user=hmac.compare_digest(username.encode(),expected.encode())
- valid_pw=bcrypt.checkpw(password.encode(),bcrypt.hashpw(configured.encode(),bcrypt.gensalt())) if configured and password else (not PROD and password=='admin12345')
+ username=safe(request.form.get('username'),120); password=request.form.get('password','')
+ valid_user=hmac.compare_digest(username.encode(),ADMIN_USERNAME.encode())
+ valid_pw=bcrypt.checkpw(password.encode(),ADMIN_PASSWORD_HASH) if ADMIN_PASSWORD_HASH and password else (not PROD and password=='admin12345')
  if not(valid_user and valid_pw):audit('admin_login_failed','admin',None,username); return page('admin-login',error='Those login details did not match.'),401
  session.clear()
  try: app.session_interface.regenerate(session)
@@ -546,10 +554,10 @@ def sitemap():
   rows=c.execute("SELECT slug,updated_at FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?)",(now(),)).fetchall()
   counties=[r[0] for r in c.execute("SELECT county FROM schools WHERE status='published' AND county<>'' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) GROUP BY county HAVING COUNT(*)>=3 ORDER BY county",(now(),)).fetchall()]
  fixed=['/','/schools','/directory/school','/directory/college','/directory/university','/advertise','/school-portal','/campus-living','/about','/privacy']+[f'/schools-in-{slugify(x)}' for x in counties]
- urls=''.join(f'<url><loc>{SITE}{u}</loc></url>' for u in fixed)+''.join(f'<url><loc>{SITE}/school/{r["slug"]}</loc><lastmod>{r["updated_at"][:10]}</lastmod></url>' for r in rows)
+ origin=current_site(); urls=''.join(f'<url><loc>{origin}{u}</loc></url>' for u in fixed)+''.join(f'<url><loc>{origin}/school/{r["slug"]}</loc><lastmod>{r["updated_at"][:10]}</lastmod></url>' for r in rows)
  return app.response_class('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls+'</urlset>',mimetype='application/xml')
 @app.get('/robots.txt')
-def robots():return f'User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: {SITE}/sitemap.xml\n',200,{'Content-Type':'text/plain; charset=utf-8'}
+def robots():return f'User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: {current_site()}/sitemap.xml\n',200,{'Content-Type':'text/plain; charset=utf-8'}
 @app.get('/uploads/<path:name>')
 def uploaded(name):return send_from_directory(UPLOAD,name)
 @app.errorhandler(404)
