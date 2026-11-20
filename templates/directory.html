@@ -17,9 +17,11 @@
         <label>Curriculum / programme<input type="search" name="curriculum" value="{{ filters.curriculum  or  '' }}" placeholder="e.g. CBC, nursing"></label>
         <button class="button button-dark full-width" type="submit">Apply filters</button>
       </form>
+      <div class="directory-side-links"><div class="eyebrow">QUICK DISCOVERY</div><a href="/schools?category=school&amp;accommodation=Boarding">Boarding schools <span>→</span></a><a href="/schools?category=school&amp;ownership=Public">Public schools <span>→</span></a><a href="/schools?category=school&amp;ownership=Private">Private schools <span>→</span></a><a href="/directory/college">Colleges &amp; TVET <span>→</span></a><a href="/directory/university">Universities <span>→</span></a></div>
+      <div class="sidebar-help"><strong>Not sure where to start?</strong><p>Learn how to search, understand profiles and check information before deciding.</p><a href="/help">Visit the help centre →</a></div>
       <div class="sidebar-ad"><span class="eyebrow">CAMPUS LIVING</span><h3>Looking for a place to stay?</h3><p>Discover hostels and rentals near campuses.</p><a href="/campus-living">Explore accommodation </a></div>
     </aside>
-    <section class="directory-results"><div class="results-top"><div><strong>{{ schools|length }}</strong> institution{{ ('' if schools|length==1 else 's') }} found</div><span>Sponsored placements are labelled</span></div>
+    <section class="directory-results"><div class="results-top"><div><strong>{{ schools|length }}</strong> institution{{ ('' if schools|length==1 else 's') }} found</div><span>Use the filters to narrow your options · Sponsored placements are labelled</span></div>
       {% if schools|length %}<div class="school-grid directory-grid">{% for school in schools %}{% include 'partials/school-card.html' %}{% endfor %}</div>{% else %}<div class="empty-state"><h3>No matching institutions yet</h3><p>Try a different county, category or search term. You can also request an institution to be added.</p><a class="button button-outline" href="/advertise">Add an institution</a></div>{% endif %}
       <div class="results-note">Institution details can change. Please contact the institution directly to confirm admissions, fees and availability.</div>
     </section>

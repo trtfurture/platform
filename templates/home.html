@@ -8,16 +8,23 @@
       <h1>Find the right place<br>to <em>learn and grow.</em></h1>
       <p class="hero-lede">Explore schools, colleges and universities. Compare what matters and connect with the institutions that fit your next step.</p>
       <form class="hero-search-form" action="/schools" method="get">
-        <label class="search-field"><input type="search" name="q" placeholder="Search by institution, course or location" aria-label="Search institution or location"></label>
-        <label class="search-select"><span>County</span><select name="county"><option value="">All Kenya</option>{% for county in counties %}<option value="{{ county }}">{{ county }}</option>{% endfor %}</select></label>
-        <button class="button button-primary" type="submit">Search institutions</button>
+        <label class="search-field"><span class="search-field-label">What are you looking for?</span><input type="search" name="q" placeholder="Try boarding schools, nursing, Ruiru..." aria-label="Search by institution, course or location"></label>
+        <label class="search-select"><span>Where? (optional)</span><select name="county" aria-label="Choose a county, or search nationwide"><option value="">Nationwide · all counties</option>{% for county in counties %}<option value="{{ county }}">{{ county }}</option>{% endfor %}</select></label>
+        <button class="button button-primary" type="submit">Find institutions</button>
       </form>
-      <div class="hero-shortcuts"><span>Popular searches:</span><a href="/schools?category=school&amp;accommodation=Boarding">Boarding schools</a><a href="/schools?category=school&amp;ownership=Private">Private schools</a><a href="/directory/college">TVET colleges</a><a href="/directory/university">Universities</a></div>
+      <div class="search-hint">Search by school name, education level, course or town. Choose a county only when you want to narrow the results.</div>
+      <div class="hero-shortcuts"><span class="popular-label">Popular searches</span><a href="/schools?category=school&amp;accommodation=Boarding">Boarding schools</a><a href="/schools?category=school&amp;ownership=Private">Private schools</a><a href="/schools?category=school&amp;ownership=Public">Public schools</a><a href="/directory/college">Colleges &amp; TVET</a><a href="/directory/university">Universities</a><a href="/schools-in-nairobi">Nairobi institutions</a></div>
     </div>
     <div class="hero-note"><span>01</span> DISCOVER WITH CONFIDENCE <small class="hero-photo-credit">Photograph: <a href="{{ heroCredit.source }}" target="_blank" rel="noopener">{{ heroCredit.author }}</a> · <a href="{{ heroCredit.licenseUrl }}" target="_blank" rel="noopener">{{ heroCredit.licenseLabel }}</a></small></div>
   </section>
 
 
+
+  <section class="container search-guide-strip" aria-label="How to search">
+    <div><span class="guide-number">01</span><div><strong>Start with a name or course</strong><small>Type a school, subject, programme or town.</small></div></div>
+    <div><span class="guide-number">02</span><div><strong>Narrow by county</strong><small>County is optional. Leave “Nationwide · all counties” selected to search everywhere.</small></div></div>
+    <div><span class="guide-number">03</span><div><strong>Open a profile</strong><small>Check details, contact the institution and share feedback.</small></div></div>
+  </section>
 
   {% if photo_featured|length %}
   <section class="container section photo-first-section">

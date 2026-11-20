@@ -235,6 +235,19 @@ SCHEMA=r'''
     message TEXT DEFAULT '',
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS institution_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    school_id INTEGER NOT NULL,
+    reviewer_name TEXT NOT NULL,
+    relationship TEXT NOT NULL DEFAULT 'Other',
+    rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+    review_text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+    created_at TEXT NOT NULL,
+    moderated_at TEXT DEFAULT '',
+    FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
+  );
 '''
 with conn() as c:
  c.execute('PRAGMA journal_mode=WAL')
@@ -243,7 +256,7 @@ with conn() as c:
   cols=[r['name'] for r in c.execute(f'PRAGMA table_info({table})')]
   if col not in cols: c.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
  c.execute("DELETE FROM admin_errors WHERE route='/pulse_receiver' AND message LIKE '%405 Method Not Allowed%'")
- c.executescript("CREATE INDEX IF NOT EXISTS idx_visitors_created ON visitor_events(created_at); CREATE INDEX IF NOT EXISTS idx_visitors_path ON visitor_events(path); CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at);")
+ c.executescript("CREATE INDEX IF NOT EXISTS idx_visitors_created ON visitor_events(created_at); CREATE INDEX IF NOT EXISTS idx_visitors_path ON visitor_events(path); CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at); CREATE INDEX IF NOT EXISTS idx_reviews_school_status ON institution_reviews(school_id,status,created_at);")
 
 def now(): return datetime.now(timezone.utc).isoformat()
 def safe(v,n=5000): return str(v or '').strip()[:n]
@@ -438,7 +451,7 @@ apply_real_photo_defaults()
 
 def active_schools(where='',params=()):
  t=now()
- with conn() as c:return [dict(x) for x in c.execute(f"SELECT *, CASE WHEN promotion_tier <> 'none' AND promotion_expires_at > ? THEN promotion_tier ELSE 'none' END AS active_promotion_tier FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) {where} ORDER BY CASE WHEN promotion_tier='vvip' AND promotion_expires_at>? THEN 0 WHEN promotion_tier='vip' AND promotion_expires_at>? THEN 1 ELSE 2 END, CASE WHEN cover_path IS NOT NULL AND TRIM(cover_path)<>'' THEN 0 ELSE 1 END, COALESCE(last_featured_at,'') ASC, name COLLATE NOCASE ASC",(t,t,*params,t,t)).fetchall()]
+ with conn() as c:return [dict(x) for x in c.execute(f"SELECT *, CASE WHEN promotion_tier <> 'none' AND promotion_expires_at > ? THEN promotion_tier ELSE 'none' END AS active_promotion_tier, COALESCE((SELECT ROUND(AVG(r.rating),1) FROM institution_reviews r WHERE r.school_id=schools.id AND r.status='approved'),0) AS average_rating, (SELECT COUNT(*) FROM institution_reviews r WHERE r.school_id=schools.id AND r.status='approved') AS review_count FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) {where} ORDER BY CASE WHEN promotion_tier='vvip' AND promotion_expires_at>? THEN 0 WHEN promotion_tier='vip' AND promotion_expires_at>? THEN 1 ELSE 2 END, CASE WHEN cover_path IS NOT NULL AND TRIM(cover_path)<>'' THEN 0 ELSE 1 END, COALESCE(last_featured_at,'') ASC, name COLLATE NOCASE ASC",(t,t,*params,t,t)).fetchall()]
 def feature_rotation(rows,limit=4):
  picked=rows[:limit]; stamp=datetime.now(timezone.utc)
  with conn() as c:
@@ -519,6 +532,9 @@ def record_public_visit():
  path=request.path or '/'
  if path.startswith(('/admin','/static','/css','/js','/images','/uploads','/healthz','/pulse_receiver')) or path in ('/favicon.ico','/robots.txt','/sitemap.xml'):
   return
+ # Optional analytics are off until a visitor opts in through Cookie settings.
+ if request.cookies.get('schools_analytics') != '1':
+  return
  if request.method != 'GET' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
   return
  agent=safe(request.user_agent.string,300).lower()
@@ -551,6 +567,8 @@ def security_headers(resp):
  resp.headers.setdefault('X-Content-Type-Options','nosniff'); resp.headers.setdefault('Referrer-Policy','strict-origin-when-cross-origin'); resp.headers.setdefault('X-Frame-Options','SAMEORIGIN'); resp.headers.setdefault('Permissions-Policy','camera=(), microphone=(), geolocation=()')
  if hasattr(request,'_visit_cookie'):
   resp.set_cookie('schools_visit',request._visit_cookie,max_age=31536000,httponly=True,samesite='Lax',secure=PROD)
+ if request.cookies.get('schools_analytics') != '1' and request.cookies.get('schools_visit'):
+  resp.delete_cookie('schools_visit',path='/')
  if PROD:resp.headers.setdefault('Strict-Transport-Security','max-age=31536000; includeSubDomains')
  return resp
 @app.get('/healthz')
@@ -608,14 +626,15 @@ def county_all(county):
 def school_profile(slug):
  t=now()
  with conn() as c:
-  row=c.execute("SELECT *,CASE WHEN promotion_tier<>'none' AND promotion_expires_at>? THEN promotion_tier ELSE 'none' END AS active_promotion_tier FROM schools WHERE slug=?",(t,slug)).fetchone()
+  row=c.execute("SELECT *,CASE WHEN promotion_tier<>'none' AND promotion_expires_at>? THEN promotion_tier ELSE 'none' END AS active_promotion_tier, COALESCE((SELECT ROUND(AVG(r.rating),1) FROM institution_reviews r WHERE r.school_id=schools.id AND r.status='approved'),0) AS average_rating, (SELECT COUNT(*) FROM institution_reviews r WHERE r.school_id=schools.id AND r.status='approved') AS review_count FROM schools WHERE slug=?",(t,slug)).fetchone()
   if not row or row['status']!='published' or (not row['is_seeded'] and row['expires_at'] and row['expires_at']<=t):abort(404)
   c.execute('UPDATE schools SET views=views+1 WHERE id=?',(row['id'],)); school=dict(row)
+  public_reviews=[dict(x) for x in c.execute("SELECT reviewer_name,relationship,rating,review_text,created_at FROM institution_reviews WHERE school_id=? AND status='approved' ORDER BY created_at DESC LIMIT 20",(row['id'],)).fetchall()]
  related=active_schools('AND id<>? AND (county=? OR category=?)',[school['id'],school['county'],school['category']])[:4]
  try:photos=json.loads(school.get('photos_json') or '[]')
  except:photos=[]
  if not photos and school.get('cover_path'):photos=[school['cover_path']]
- ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | Kenya Schools",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=current_site()+'/school/'+slug,school=school,related=related,photos=photos,enquirySent=request.args.get('enquiry')=='sent',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':current_site()+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':(school.get('cover_path') if str(school.get('cover_path') or '').startswith(('http://','https://')) else current_site()+(school.get('cover_path') or '')) or HERO_PHOTO['url']})
+ ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | Kenya Schools",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=current_site()+'/school/'+slug,school=school,related=related,photos=photos,publicReviews=public_reviews,enquirySent=request.args.get('enquiry')=='sent',reviewSent=request.args.get('review')=='submitted',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':current_site()+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':(school.get('cover_path') if str(school.get('cover_path') or '').startswith(('http://','https://')) else current_site()+(school.get('cover_path') or '')) or HERO_PHOTO['url']})
  return render_template('school.html',**ctx)
 @app.post('/school/<slug>/enquiry')
 @limiter.limit('8 per hour')
@@ -626,6 +645,27 @@ def enquiry(slug):
  if not name or len(msg)<10:return error_page('Please complete the enquiry','Enter your name and a message of at least 10 characters.')
  with conn() as c:c.execute('INSERT INTO enquiries(school_id,name,email,phone,message,created_at) VALUES(?,?,?,?,?,?)',(school['id'],name,safe(request.form.get('email'),160),safe(request.form.get('phone'),60),msg,now()))
  audit('parent_enquiry_received','school',school['id'],name); return redirect(f"/school/{slug}?enquiry=sent")
+@app.post('/school/<slug>/review')
+@limiter.limit('3 per hour')
+def submit_review(slug):
+ with conn() as c:
+  school=c.execute("SELECT id,slug FROM schools WHERE slug=? AND status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?)",(slug,now())).fetchone()
+ if not school:abort(404)
+ # A hidden honeypot field catches basic automated spam without collecting extra personal data.
+ if safe(request.form.get('website_url'),200):return redirect('/school/'+slug+'?review=submitted#reviews')
+ name=safe(request.form.get('reviewer_name'),100)
+ relationship=safe(request.form.get('relationship'),40)
+ try: rating=int(request.form.get('rating','0'))
+ except (TypeError,ValueError): rating=0
+ message=safe(request.form.get('review_text'),1200)
+ allowed_relationships=('Parent / guardian','Current student','Former student','Staff member','Other')
+ if not name or relationship not in allowed_relationships or rating not in (1,2,3,4,5) or len(message)<20:
+  return error_page('Please check your review','Enter your name, choose how you know the institution, select a 1–5 rating and write at least 20 characters.')
+ with conn() as c:
+  c.execute('INSERT INTO institution_reviews(school_id,reviewer_name,relationship,rating,review_text,status,created_at) VALUES(?,?,?,?,?,?,?)',(school['id'],name,relationship,rating,message,'pending',now()))
+ audit('institution_review_submitted','review',None,f"Review submitted for school {school['id']}; awaiting moderation")
+ return redirect('/school/'+slug+'?review=submitted#reviews')
+
 @app.get('/advertise')
 def advertise():return page('advertise',sent=request.args.get('sent')=='1')
 @app.post('/advertise')
@@ -680,6 +720,8 @@ def campus_post():
  audit('property_submitted','property',None,title); return redirect('/campus-living?sent=1')
 @app.get('/about')
 def about():return page('about')
+@app.get('/help')
+def help_centre():return page('help',metaTitle='Help Centre | Kenya Schools',metaDescription='Simple guidance for searching institutions, understanding profiles, submitting reviews and contacting Kenya Schools.')
 @app.get('/contact')
 def contact():return page('contact',sent=request.args.get('sent')=='1')
 @app.post('/contact')
@@ -724,14 +766,15 @@ def admin_dashboard():
   enquiries=[dict(x) for x in c.execute('SELECT e.*,s.name AS school_name FROM enquiries e LEFT JOIN schools s ON s.id=e.school_id ORDER BY e.id DESC LIMIT 20').fetchall()]
   portals=[dict(x) for x in c.execute('SELECT * FROM portal_enquiries ORDER BY id DESC LIMIT 20').fetchall()]
   messages=[dict(x) for x in c.execute('SELECT * FROM contact_messages ORDER BY id DESC LIMIT 30').fetchall()]
-  stats={k:c.execute(sql).fetchone()[0] for k,sql in [('schools',"SELECT COUNT(*) FROM schools WHERE status='published'"),('pending',"SELECT COUNT(*) FROM schools WHERE status='pending'"),('expired',"SELECT COUNT(*) FROM schools WHERE status='expired'"),('properties',"SELECT COUNT(*) FROM properties WHERE status='pending'"),('enquiries','SELECT COUNT(*) FROM enquiries'),('visitors_today',"SELECT COUNT(DISTINCT visitor_key) FROM visitor_events WHERE date(created_at)=date('now')"),('visits_today',"SELECT COUNT(*) FROM visitor_events WHERE date(created_at)=date('now')"),('visitors_total',"SELECT COUNT(DISTINCT visitor_key) FROM visitor_events"),('accounts','SELECT COUNT(*) FROM customer_accounts')]}
+  reviews=[dict(x) for x in c.execute("SELECT r.*,s.name AS school_name,s.slug AS school_slug FROM institution_reviews r JOIN schools s ON s.id=r.school_id ORDER BY CASE r.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,r.created_at DESC LIMIT 80").fetchall()]
+  stats={k:c.execute(sql).fetchone()[0] for k,sql in [('schools',"SELECT COUNT(*) FROM schools WHERE status='published'"),('pending',"SELECT COUNT(*) FROM schools WHERE status='pending'"),('expired',"SELECT COUNT(*) FROM schools WHERE status='expired'"),('properties',"SELECT COUNT(*) FROM properties WHERE status='pending'"),('enquiries','SELECT COUNT(*) FROM enquiries'),('reviews_pending',"SELECT COUNT(*) FROM institution_reviews WHERE status='pending'"),('reviews_approved',"SELECT COUNT(*) FROM institution_reviews WHERE status='approved'"),('reviews_total',"SELECT COUNT(*) FROM institution_reviews"),('visitors_today',"SELECT COUNT(DISTINCT visitor_key) FROM visitor_events WHERE date(created_at)=date('now')"),('visits_today',"SELECT COUNT(*) FROM visitor_events WHERE date(created_at)=date('now')"),('visitors_total',"SELECT COUNT(DISTINCT visitor_key) FROM visitor_events"),('accounts','SELECT COUNT(*) FROM customer_accounts')]}
   settings={r['key']:r['value'] for r in c.execute('SELECT key,value FROM site_settings')}
   visitor_paths=[dict(x) for x in c.execute("SELECT path,COUNT(*) AS hits,COUNT(DISTINCT visitor_key) AS visitors FROM visitor_events WHERE created_at>=? GROUP BY path ORDER BY hits DESC LIMIT 12",((datetime.now(timezone.utc)-timedelta(days=7)).isoformat(),)).fetchall()]
   visitor_days=[dict(x) for x in c.execute("SELECT date(created_at) AS day,COUNT(DISTINCT visitor_key) AS visitors,COUNT(*) AS views FROM visitor_events WHERE created_at>=? GROUP BY date(created_at) ORDER BY day DESC LIMIT 14",((datetime.now(timezone.utc)-timedelta(days=14)).isoformat(),)).fetchall()]
   accounts=[dict(x) for x in c.execute('SELECT * FROM customer_accounts ORDER BY id DESC LIMIT 30').fetchall()]
   payments=[dict(x) for x in c.execute("SELECT p.*,a.full_name,a.phone,a.email FROM payment_records p LEFT JOIN customer_accounts a ON a.id=p.account_id ORDER BY p.id DESC LIMIT 30").fetchall()]
 
- ctx=base_context(); ctx.update(robots='noindex,nofollow',metaTitle='Admin Dashboard | Kenya Schools',schools=schools,properties=props,errors=errors,enquiries=enquiries,portalEnquiries=portals,contactMessages=messages,stats=stats,settings=settings,visitorPaths=visitor_paths,visitorDays=visitor_days,payments=payments,accounts=accounts); return render_template('admin-dashboard.html',**ctx)
+ ctx=base_context(); ctx.update(robots='noindex,nofollow',metaTitle='Admin Dashboard | Kenya Schools',schools=schools,properties=props,errors=errors,enquiries=enquiries,portalEnquiries=portals,contactMessages=messages,reviews=reviews,stats=stats,settings=settings,visitorPaths=visitor_paths,visitorDays=visitor_days,payments=payments,accounts=accounts); return render_template('admin-dashboard.html',**ctx)
 def admin_action(sql,args,action,typ,rid,detail=''):
  r=admin_guard()
  if r:return r
@@ -789,6 +832,26 @@ def school_promotion(rid):
 @app.post('/admin/schools/<int:rid>/trust')
 def school_trust(rid):
  trust=request.form.get('trust_status','unverified'); trust=trust if trust in ('unverified','recognised','official') else 'unverified'; return admin_action('UPDATE schools SET trust_status=?,updated_at=? WHERE id=?',(trust,now(),rid),'trust_status_changed','school',rid,trust)
+@app.post('/admin/reviews/<int:rid>/approve')
+def review_approve(rid):
+ r=admin_guard()
+ if r:return r
+ with conn() as c:
+  cur=c.execute("UPDATE institution_reviews SET status='approved',moderated_at=? WHERE id=?",(now(),rid))
+  if cur.rowcount==0:abort(404)
+ audit('institution_review_approved','review',rid,'Review approved for public display')
+ return redirect('/admin#reviews')
+
+@app.post('/admin/reviews/<int:rid>/reject')
+def review_reject(rid):
+ r=admin_guard()
+ if r:return r
+ with conn() as c:
+  cur=c.execute("UPDATE institution_reviews SET status='rejected',moderated_at=? WHERE id=?",(now(),rid))
+  if cur.rowcount==0:abort(404)
+ audit('institution_review_rejected','review',rid,'Review rejected; not shown publicly')
+ return redirect('/admin#reviews')
+
 @app.post('/admin/properties/<int:rid>/approve')
 def property_approve(rid):return admin_action("UPDATE properties SET status='published' WHERE id=?",(rid,),'property_approved','property',rid)
 @app.post('/admin/properties/<int:rid>/hide')
@@ -894,7 +957,7 @@ def sitemap():
  with conn() as c:
   rows=c.execute("SELECT slug,updated_at FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?)",(now(),)).fetchall()
   counties=[r[0] for r in c.execute("SELECT county FROM schools WHERE status='published' AND county<>'' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) GROUP BY county HAVING COUNT(*)>=3 ORDER BY county",(now(),)).fetchall()]
- fixed=['/','/schools','/directory/school','/directory/college','/directory/university','/advertise','/school-portal','/campus-living','/about','/privacy','/contact']+[f'/schools-in-{slugify(x)}' for x in counties]
+ fixed=['/','/schools','/directory/school','/directory/college','/directory/university','/advertise','/school-portal','/campus-living','/about','/privacy','/contact','/help']+[f'/schools-in-{slugify(x)}' for x in counties]
  origin=current_site(); urls=''.join(f'<url><loc>{origin}{u}</loc></url>' for u in fixed)+''.join(f'<url><loc>{origin}/school/{r["slug"]}</loc><lastmod>{r["updated_at"][:10]}</lastmod></url>' for r in rows)
  return app.response_class('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls+'</urlset>',mimetype='application/xml')
 @app.get('/robots.txt')

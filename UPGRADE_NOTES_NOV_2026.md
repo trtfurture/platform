@@ -24,3 +24,11 @@
 - The admin payment record is an operations ledger, not a payment gateway.
 - Visitor counts are approximate: one browser cookie represents a visitor; clearing cookies or using another device can count as another visitor.
 - Google ranking cannot be guaranteed. Technical SEO, metadata, schema, sitemap and internal linking support discovery, but rankings depend on relevance, quality, competition and reputation.
+
+
+## November 20 experience and trust update
+- Institution ratings and written reviews are available on public institution profiles. New submissions enter a pending moderation queue; only administrator-approved reviews affect the public average and become visible. Administrators can approve, reject or hide a previously approved review in `/admin` under Ratings & reviews.
+- The homepage search now explains what visitors can search for, treats county as optional, labels nationwide search as “All counties”, and presents popular searches as noticeable shortcut chips.
+- Directory filters include quick-discovery links and a help-centre path. A public `/help` page explains search, profile labels, reviews and cookie choices.
+- A cookie banner offers Essential only, Accept all and Customize. Optional visitor analytics are not recorded unless the visitor opts in; IP addresses are still not stored in the analytics table. Cookie settings can be reopened from the page footer or the floating control.
+- The new review table is created with a safe `CREATE TABLE IF NOT EXISTS` migration and is included automatically in SQLite and JSON backups. Existing institution, enquiry, payment and upload data are not intentionally removed.

@@ -15,6 +15,7 @@
     </div>
     <h3><a href="/school/{{ school.slug }}">{{ school.name }}</a></h3>
     <p class="school-location">{{ join_nonempty([school.town, school.county]) or 'Kenya' }}</p>
+    {% if school.review_count %}<div class="card-rating" aria-label="Rated {{ school.average_rating }} out of 5 from {{ school.review_count }} reviews"><span>★ {{ school.average_rating }}</span><small>{{ school.review_count }} review{{ '' if school.review_count==1 else 's' }}</small></div>{% else %}<div class="card-rating card-rating-empty"><span>☆ Not yet rated</span><small>Be the first to review</small></div>{% endif %}
     {% if school.cover_path %}<p class="school-description">{{ school.description or 'Explore the institution profile, location and contact details.' }}</p>{% endif %}
     {% if school.cover_path %}<div class="school-meta">{% if school.ownership %}<span>{{ school.ownership }}</span>{% endif %}{% if school.accommodation %}<span>{{ school.accommodation }}</span>{% endif %}{% if school.gender %}<span>{{ school.gender }}</span>{% endif %}</div>{% endif %}
     <a class="button button-outline card-action" href="/school/{{ school.slug }}">View profile</a>
