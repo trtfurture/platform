@@ -9,7 +9,7 @@
       <p class="hero-lede">Explore schools, colleges and universities. Compare what matters and connect with the institutions that fit your next step.</p>
       <form class="hero-search-form" action="/schools" method="get">
         <label class="search-field"><input type="search" name="q" placeholder="Search by institution, course or location" aria-label="Search institution or location"></label>
-        <label class="search-select"><span>County</span><select name="county"><option value="">All Kenya</option><option>Nairobi</option><option>Kiambu</option><option>Nakuru</option><option>Mombasa</option><option>Machakos</option><option>Kajiado</option><option>Kisumu</option></select></label>
+        <label class="search-select"><span>County</span><select name="county"><option value="">All Kenya</option>{% for county in counties %}<option value="{{ county }}">{{ county }}</option>{% endfor %}</select></label>
         <button class="button button-primary" type="submit">Search institutions</button>
       </form>
       <div class="hero-shortcuts"><span>Popular searches:</span><a href="/schools?category=school&amp;accommodation=Boarding">Boarding schools</a><a href="/schools?category=school&amp;ownership=Private">Private schools</a><a href="/directory/college">TVET colleges</a><a href="/directory/university">Universities</a></div>
@@ -17,8 +17,21 @@
     <div class="hero-note"><span>01</span> DISCOVER WITH CONFIDENCE <small class="hero-photo-credit">Photograph: <a href="{{ heroCredit.source }}" target="_blank" rel="noopener">{{ heroCredit.author }}</a> · <a href="{{ heroCredit.licenseUrl }}" target="_blank" rel="noopener">{{ heroCredit.licenseLabel }}</a></small></div>
   </section>
 
+
+
+  {% if photo_featured|length %}
+  <section class="container section photo-first-section">
+    <div class="section-heading"><div><div class="eyebrow">REAL CAMPUS PHOTOGRAPHS</div><h2>Take a look around.</h2><p>Explore institutions with genuine photographs. More listings appear below by name and location until their own photographs are added.</p></div><a href="/schools" class="text-link">Browse all institutions</a></div>
+    <div class="school-grid photo-first-grid">{% for school in photo_featured %}{% include 'partials/school-card.html' %}{% endfor %}</div>
+  </section>
+  {% endif %}
+
+  {% if vvip|length %}
+  <section class="featured-ribbon"><div class="container ribbon-inner"><div><span class="eyebrow light">FEATURED SPOTLIGHT</span><h2>Institutions worth discovering.</h2></div><div class="ribbon-logos">{% for school in vvip %}<a href="/school/{{ school.slug }}"><span class="promo-badge vvip">VVIP</span><strong>{{ school.name }}</strong><small>{{ join_nonempty([school.town, school.county]) }}</small></a>{% endfor %}</div></div></section>
+  {% endif %}
+
   <section class="container section category-section">
-    <div class="section-heading"><div><div class="eyebrow">EXPLORE EDUCATION</div><h2>Where are you headed?</h2><p>Start with the type of institution you're looking for.</p></div><a href="/schools" class="text-link">Browse everything </a></div>
+    <div class="section-heading"><div><div class="eyebrow">EXPLORE EDUCATION</div><h2>Where are you headed?</h2><p>Choose the type of institution you want to explore.</p></div><a href="/schools" class="text-link">Browse everything</a></div>
     <div class="category-grid">
       <a class="category-button" href="/schools?category=school&amp;ownership=Private"><strong>Private schools</strong><small>Nursery, primary &amp; secondary</small></a>
       <a class="category-button" href="/schools?category=school&amp;ownership=Public"><strong>Public schools</strong><small>Explore public institutions</small></a>
@@ -27,24 +40,29 @@
     </div>
   </section>
 
-  {% if vvip|length %}
-  <section class="featured-ribbon"><div class="container ribbon-inner"><div><span class="eyebrow light">FEATURED SPOTLIGHT</span><h2>Institutions worth discovering.</h2></div><div class="ribbon-logos">{% for school in vvip %}<a href="/school/{{ school.slug }}"><span class="promo-badge vvip">VVIP</span><strong>{{ school.name }}</strong><small>{{ join_nonempty([school.town, school.county]) }}</small></a>{% endfor %}</div></div></section>
-  {% endif %}
-
-  <section class="container section">
-    <div class="section-heading"><div><div class="eyebrow">DISCOVERED ON SCHOOLS</div><h2>Institutions to explore</h2><p>Profiles to help you take a closer look.</p></div><a href="/schools" class="text-link">See all institutions </a></div>
-    {% if featured|length %}<div class="school-grid">{% for school in featured %}{% include 'partials/school-card.html' %}{% endfor %}</div>{% else %}<div class="empty-state"><h3>Your next discovery starts here</h3><p>We are preparing more institution profiles. Start by searching for a school or college.</p><a class="button button-outline" href="/schools">Explore the directory</a></div>{% endif %}
+  {% if text_featured|length %}
+  <section class="container section text-directory-section">
+    <div class="section-heading"><div><div class="eyebrow">MORE IN THE DIRECTORY</div><h2>Schools and institutions by name.</h2><p>These profiles currently show their name and recorded location. Institutions can add their own photographs when they claim or update a listing.</p></div><a href="/schools" class="text-link">Open full directory</a></div>
+    <div class="home-directory-list">
+      {% for school in text_featured %}
+      <article class="home-directory-row">
+        <div class="home-directory-copy"><h3><a href="/school/{{ school.slug }}">{{ school.name }}</a></h3><p>{{ join_nonempty([school.town, school.county]) or 'Kenya' }}{% if school.ownership %} · {{ school.ownership }}{% endif %}{% if school.category == 'college' %} · College / TVET{% elif school.category == 'university' %} · University{% else %} · School{% endif %}</p></div>
+        <a class="button button-outline home-directory-action" href="/school/{{ school.slug }}">View profile</a>
+      </article>
+      {% endfor %}
+    </div>
   </section>
+  {% endif %}
 
   <section class="container partner-section">
     <div class="partner-panel"><div class="partner-symbol"><img src="/images/kenya-flag.svg" alt="Kenya" width="34" height="23"></div><div><div class="eyebrow light">FOR SCHOOLS & INSTITUTIONS</div><h2>Make your campus<br>easy to discover.</h2><p>Showcase your facilities, admissions information, photos and videos to people actively exploring education options.</p><a class="button button-light" href="/advertise">Advertise your institution</a></div></div>
-    <div class="portal-panel"><div class="eyebrow">YOUR DIGITAL FRONT DOOR</div><h2>Give your institution<br>a website of its own.</h2><p>Get a modern school website with a simple dashboard to manage news, admissions and campus information.</p><a class="text-link" href="/school-portal">Explore school portals </a><div class="portal-art"><div class="portal-window"><div class="portal-lines"></div><div class="portal-blocks"></div></div></div></div>
+    <div class="portal-panel"><div class="eyebrow">YOUR DIGITAL FRONT DOOR</div><h2>Give your institution<br>a website of its own.</h2><p>Get a modern school website with a simple dashboard to manage news, admissions and campus information.</p><a class="button button-outline" href="/school-portal">Explore school portals</a><div class="portal-art"><div class="portal-window"><div class="portal-lines"></div><div class="portal-blocks"></div></div></div></div>
   </section>
 
   <section class="container section living-section">
-    <div class="living-copy"><div class="eyebrow">BEYOND THE CLASSROOM</div><h2>Find your place<br>around campus.</h2><p>Explore student accommodation, hostels and nearby services as the campus marketplace grows.</p><a class="button button-dark" href="/campus-living">Explore campus living </a></div>
-    <div class="living-card"><div class="living-photo"></div><div class="living-card-copy"><span class="promo-badge vip">CAMPUS LIVING</span><h3>Student stays & rentals</h3><p>Discover places to stay near colleges and universities.</p><a href="/campus-living" class="text-link">Explore listings </a></div></div>
+    <div class="living-copy"><div class="eyebrow">BEYOND THE CLASSROOM</div><h2>Find your place<br>around campus.</h2><p>Explore student accommodation, hostels and nearby services as the campus marketplace grows.</p><a class="button button-dark" href="/campus-living">Explore campus living</a></div>
+    <div class="living-card"><div class="living-photo"></div><div class="living-card-copy"><span class="promo-badge vip">CAMPUS LIVING</span><h3>Student stays & rentals</h3><p>Discover places to stay near colleges and universities.</p><a href="/campus-living" class="button button-outline">Explore listings</a></div></div>
   </section>
-  <section class="container note-strip"><p><strong>Our promise:</strong> Listings are reviewed, promotion is labelled clearly, and institution information should be confirmed directly before making important decisions.</p><a href="/about">How it works </a></section>
+  <section class="container note-strip"><p><strong>Our promise:</strong> Listings are reviewed, promotion is labelled clearly, and institution information should be confirmed directly before making important decisions.</p><a href="/about">How it works</a></section>
 </main>
 {% include 'partials/footer.html' %}

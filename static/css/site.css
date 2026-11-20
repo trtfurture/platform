@@ -488,3 +488,106 @@ textarea { resize: vertical; }
 .profile-photo-item .profile-gallery-image { width:100%; height:190px; object-fit:cover; }
 .category-grid { align-items:stretch; }
 @media (max-width:720px) { .kenya-flag { width:25px; height:17px; } }
+
+
+/* SCHOOLS discovery refresh: photographed profiles first, factual name/location rows second. */
+.category-button {
+  min-height: 72px;
+  padding: 13px 17px;
+  border: 1px solid #17324d;
+  border-radius: 5px;
+  background: #17324d;
+  color: #fff;
+  box-shadow: none;
+  transition: background .16s ease, border-color .16s ease;
+}
+.category-button:hover { background: #244d6d; border-color: #244d6d; transform: none; }
+.category-button strong { font-size: .94rem; letter-spacing: -.01em; }
+.category-button small { color: rgba(255,255,255,.84); font-size: .69rem; }
+.photo-first-section { padding-top: 48px; }
+.photo-first-grid { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 20px; }
+.photo-first-grid .school-card { border-radius: 8px; box-shadow: 0 3px 14px rgba(19,43,66,.055); }
+.photo-first-grid .school-card-image { height: 205px; background: #e9eef2; }
+.photo-first-grid .school-card-body { padding: 15px 16px 17px; }
+.school-card { border-radius: 9px; }
+.school-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(19,43,66,.09); }
+.school-card-image { background: #e9eef2; }
+.school-photo-placeholder { display: none !important; }
+.school-card-text-only { display: flex; min-height: 0; border-radius: 7px; box-shadow: none; }
+.school-card-text-only:hover { transform: none; box-shadow: 0 5px 16px rgba(19,43,66,.06); }
+.school-card-text-only .school-card-body { width: 100%; padding: 14px 16px; }
+.school-card-text-only .badge-row { margin-bottom: 5px; }
+.school-card-text-only h3 { font-size: .95rem; margin-bottom: 3px; }
+.school-card-text-only .school-location { margin-bottom: 9px; }
+.school-card-text-only .school-description,
+.school-card-text-only .school-meta { display: none; }
+.card-action { min-height: 34px; padding: 7px 12px; font-size: .72rem; }
+.text-directory-section { padding-top: 35px; }
+.home-directory-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 28px; border-top: 1px solid #e6ebef; }
+.home-directory-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-width: 0; padding: 13px 0; border-bottom: 1px solid #e6ebef; }
+.home-directory-copy { min-width: 0; }
+.home-directory-copy h3 { margin: 0 0 3px; font: 750 .88rem Manrope,sans-serif; color: #17324d; line-height: 1.3; }
+.home-directory-copy h3 a:hover { color: #2269a5; }
+.home-directory-copy p { margin: 0; color: #71808d; font-size: .7rem; line-height: 1.4; }
+.home-directory-action { flex: 0 0 auto; min-height: 32px; padding: 6px 10px; font-size: .66rem; }
+.directory-grid { align-items: start; }
+.directory-grid .school-card-text-only { grid-column: span 1; }
+@media (max-width: 980px) {
+  .photo-first-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 720px) {
+  .photo-first-section { padding-top: 37px; }
+  .photo-first-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .photo-first-grid .school-card-image { height: 135px; }
+  .photo-first-grid .school-card-body { padding: 11px 11px 13px; }
+  .photo-first-grid .school-card h3 { font-size: .88rem; }
+  .photo-first-grid .school-location { font-size: .68rem; }
+  .photo-first-grid .school-description { display: none; }
+  .photo-first-grid .school-meta { display: none; }
+  .home-directory-list { grid-template-columns: 1fr; }
+  .home-directory-row { padding: 12px 0; }
+  .home-directory-copy h3 { font-size: .84rem; }
+  .home-directory-action { font-size: .62rem; }
+}
+@media (max-width: 390px) {
+  .photo-first-grid { grid-template-columns: 1fr; }
+  .photo-first-grid .school-card-image { height: 185px; }
+  .category-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* In the full directory, photo-less institutions become clean full-width name/location rows. */
+.directory-grid .school-card-text-only {
+  grid-column: 1 / -1;
+  border: 0;
+  border-bottom: 1px solid #e6ebef;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.directory-grid .school-card-text-only:hover {
+  transform: none;
+  box-shadow: none;
+  background: #fafcfd;
+}
+.directory-grid .school-card-text-only .school-card-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 13px 9px;
+}
+.directory-grid .school-card-text-only .badge-row {
+  flex: 0 0 100%;
+  margin: 0;
+}
+.directory-grid .school-card-text-only h3 {
+  flex: 1 1 220px;
+  margin: 0;
+}
+.directory-grid .school-card-text-only .school-location {
+  flex: 1 1 160px;
+  margin: 0;
+}
+.directory-grid .school-card-text-only .card-action {
+  margin-left: auto;
+}

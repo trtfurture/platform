@@ -1,4 +1,4 @@
-import os, re, json, hmac, secrets, sqlite3, shutil, time, threading, zipfile
+import os, re, json, hmac, secrets, sqlite3, shutil, time, threading, zipfile, csv
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -321,12 +321,69 @@ with conn() as c:
    name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc=r; t=now()
    c.execute("INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,website,description,trust_status,promotion_tier,status,source_note,is_seeded,posted_at,expires_at,last_renewed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'recognised','none','published',?,1,?,'',?,?,?)",(name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc,'Recognised public-information listing. The institution has not yet claimed or confirmed this profile on SCHOOLS.',t,t,t,t))
 
+
+# Additive Phase 1 national public senior-school directory import.
+# The source list is an independently published 2026 C1 school list; entries are
+# marked unverified until each institution claims or confirms its profile.
+C1_SOURCE_NOTE = (
+ "Directory data transcribed from CBC Teachers Online, '2026 C1 Senior Schools: "
+ "Complete List of National Schools by County', published 29 September 2026. "
+ "County and sub-county are reproduced from that published list. This listing "
+ "has not been individually confirmed by the institution on SCHOOLS."
+)
+def import_public_senior_schools():
+ source_file=BASE/'public_senior_schools_2026.csv'
+ if not source_file.is_file():
+  app.logger.warning('Public C1 school seed file missing; existing directory left unchanged.')
+  return
+ added=0
+ with source_file.open('r',encoding='utf-8-sig',newline='') as handle:
+  entries=list(csv.DictReader(handle))
+ with conn() as c:
+  for item in entries:
+   name=safe(item.get('name'),180)
+   county=safe(item.get('county'),80)
+   subcounty=safe(item.get('subcounty'),100)
+   gender=safe(item.get('gender'),20)
+   if not name or county not in COUNTIES:
+    continue
+   slug=slugify(name)
+   existing=c.execute('SELECT id FROM schools WHERE slug=? OR (lower(name)=lower(?) AND lower(county)=lower(?))',(slug,name,county)).fetchone()
+   if existing:
+    continue
+   base_slug=slug
+   suffix=slugify(county) or 'public'
+   candidate=f'{base_slug}-{suffix}'[:75]
+   counter=2
+   while c.execute('SELECT 1 FROM schools WHERE slug=?',(candidate,)).fetchone():
+    candidate=f'{base_slug}-{suffix}-{counter}'[:75]
+    counter+=1
+   slug=candidate if slug!=base_slug else base_slug
+   timestamp=now()
+   description=(
+    f"Listed as a C1 senior secondary school in the 2026 county directory. "
+    f"The published source places it in {subcounty}, {county} County. "
+    "Confirm current admissions, programmes, boarding availability and requirements directly with the school."
+   )
+   c.execute("""INSERT INTO schools
+    (name,slug,category,ownership,levels,county,town,gender,curriculum,description,
+     trust_status,promotion_tier,status,source_note,is_seeded,posted_at,expires_at,
+     last_renewed_at,created_at,updated_at)
+    VALUES(?,?,'school','Public','C1 Senior Secondary',?,?,?,?,?,
+     'unverified','none','published',?,1,?,'','',?,?)""",
+    (name,slug,county,subcounty,gender,'CBC Senior School (C1)',description,C1_SOURCE_NOTE,timestamp,timestamp,timestamp))
+   added+=1
+ if added:
+  app.logger.info('Added %s sourced C1 public senior-school profiles; existing records were not overwritten.',added)
+
+import_public_senior_schools()
+
 apply_real_photo_defaults()
 
 
 def active_schools(where='',params=()):
  t=now()
- with conn() as c:return [dict(x) for x in c.execute(f"SELECT *, CASE WHEN promotion_tier <> 'none' AND promotion_expires_at > ? THEN promotion_tier ELSE 'none' END AS active_promotion_tier FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) {where} ORDER BY CASE WHEN promotion_tier='vvip' AND promotion_expires_at>? THEN 0 WHEN promotion_tier='vip' AND promotion_expires_at>? THEN 1 ELSE 2 END, COALESCE(last_featured_at,'') ASC, name COLLATE NOCASE ASC",(t,t,t,t,*params)).fetchall()]
+ with conn() as c:return [dict(x) for x in c.execute(f"SELECT *, CASE WHEN promotion_tier <> 'none' AND promotion_expires_at > ? THEN promotion_tier ELSE 'none' END AS active_promotion_tier FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) {where} ORDER BY CASE WHEN promotion_tier='vvip' AND promotion_expires_at>? THEN 0 WHEN promotion_tier='vip' AND promotion_expires_at>? THEN 1 ELSE 2 END, CASE WHEN cover_path IS NOT NULL AND TRIM(cover_path)<>'' THEN 0 ELSE 1 END, COALESCE(last_featured_at,'') ASC, name COLLATE NOCASE ASC",(t,t,t,t,*params)).fetchall()]
 def feature_rotation(rows,limit=4):
  picked=rows[:limit]; stamp=datetime.now(timezone.utc)
  with conn() as c:
@@ -411,8 +468,12 @@ def health():
 def home():
  with conn() as c:
   counts={k:c.execute('SELECT COUNT(*) FROM schools WHERE status="published"'+(f' AND category="{cat}"' if cat else '')).fetchone()[0] for k,cat in [('allCount',''),('schoolCount','school'),('collegeCount','college'),('universityCount','university')]}
- featured=feature_rotation(active_schools(),4); vvip=feature_rotation(active_schools("AND promotion_tier='vvip' AND promotion_expires_at>?",[now()]),3)
- return page('home',featured=featured,vvip=vvip,counts=counts)
+ # Real-photo profiles form the visual first phase; profiles without photos stay searchable as text entries.
+ photo_rows=active_schools("AND cover_path IS NOT NULL AND TRIM(cover_path)<>''")
+ photo_featured=photo_rows[:6]
+ text_featured=active_schools("AND (cover_path IS NULL OR TRIM(cover_path)='')")[:12]
+ vvip=feature_rotation(active_schools("AND promotion_tier='vvip' AND promotion_expires_at>?",[now()]),3)
+ return page('home',photo_featured=photo_featured,text_featured=text_featured,vvip=vvip,counts=counts,counties=COUNTIES)
 @app.get('/schools')
 def schools():
  fields={k:safe(request.args.get(k),n) for k,n in [('q',120),('county',80),('ownership',40),('level',60),('accommodation',40),('category',30),('gender',40),('town',80),('curriculum',100)]}
