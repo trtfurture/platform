@@ -19,13 +19,16 @@ for p in (DATA,UPLOAD,BACKUP): p.mkdir(parents=True,exist_ok=True)
 PORT=int(os.environ.get('PORT','10000')); PROD=os.environ.get('FLASK_ENV')=='production' or os.environ.get('RENDER')=='true'
 SITE=(os.environ.get('PUBLIC_SITE_URL') or f'http://localhost:{PORT}').rstrip('/')
 if PROD:
- for key in ('ADMIN_USERNAME','ADMIN_PASSWORD','SESSION_SECRET'):
+ for key in ('ADMIN_USERNAME','ADMIN_PASSWORD'):
   if not os.environ.get(key): raise RuntimeError(f'Missing required Render environment variable: {key}')
- if len(os.environ.get('SESSION_SECRET',''))<32: raise RuntimeError('SESSION_SECRET must be at least 32 characters')
 
 app=Flask(__name__,static_folder='static',static_url_path='')
 app.wsgi_app=ProxyFix(app.wsgi_app,x_for=1,x_proto=1,x_host=1)
-app.secret_key=os.environ.get('SESSION_SECRET','development-only-change-this-secret-before-deploying-123456789')
+# Keep Render's secret-variable setup to ADMIN_USERNAME and ADMIN_PASSWORD only.
+# Derive a separate session-signing key from the admin password; changing the
+# password will invalidate existing admin sessions, which is expected.
+_admin_password_for_key=os.environ.get('ADMIN_PASSWORD','')
+app.secret_key=hashlib.sha256(('schools.co.ke-session-key:'+_admin_password_for_key).encode('utf-8')).hexdigest() if _admin_password_for_key else 'development-only-change-this-secret-before-deploying-123456789'
 app.config.update(SESSION_TYPE='filesystem',SESSION_FILE_DIR=str(DATA/'flask_sessions'),SESSION_PERMANENT=True,PERMANENT_SESSION_LIFETIME=timedelta(hours=8),SESSION_COOKIE_NAME='schools.admin',SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=PROD,MAX_CONTENT_LENGTH=50*1024*1024)
 Path(app.config['SESSION_FILE_DIR']).mkdir(parents=True,exist_ok=True)
 Session(app)

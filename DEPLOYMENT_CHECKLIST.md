@@ -11,7 +11,7 @@
 - [ ] Create the service from `render.yaml` using Render Blueprint.
 - [ ] Add a unique `ADMIN_USERNAME`.
 - [ ] Add a long, unique `ADMIN_PASSWORD` (not the example value).
-- [ ] Confirm Render generated `SESSION_SECRET`.
+- [ ] Confirm `ADMIN_USERNAME` and `ADMIN_PASSWORD` are the only manually supplied admin secret variables; no additional session-secret variable is required.
 - [ ] Confirm the persistent disk is mounted at `/var/data`.
 - [ ] Confirm `PUBLIC_SITE_URL=https://schools.co.ke`.
 - [ ] Confirm `SIGNATURE_QR_URL=https://schools.co.ke` (or replace with the approved signature QR destination).
