@@ -1,16 +1,18 @@
 <article class="school-card">
-  <a class="school-card-image" href="/school/{{ school.slug }}">
-    <img src="{{ school.cover_path  or  '/images/school-hero.webp' }}" alt="Campus view for {{ school.name }}" loading="lazy">
+  <a class="school-card-image{% if not school.cover_path or (school.is_seeded and (not school.image_credit or not school.image_source_url)) %} no-photo{% endif %}" href="/school/{{ school.slug }}">
+    {% if school.cover_path and (not school.is_seeded or (school.image_credit and school.image_source_url)) %}<img src="{{ school.cover_path }}" alt="Actual campus photograph for {{ school.name }}" loading="lazy">{% else %}<span class="institution-monogram" aria-hidden="true">{{ institutionInitials(school.name) }}</span><span class="no-photo-label">Campus photo not supplied</span>{% endif %}
+    {% if school.image_credit and school.image_source_url %}<small class="photo-credit">REAL CAMPUS PHOTO</small>{% endif %}
     <span class="card-category">{{ ('University' if school.category == 'university' else ('College / TVET' if school.category == 'college' else (school.levels  or  'School'))) }}</span>
-  </a>
+</a>
   <div class="school-card-body">
     <div class="badge-row">
-      {% if school.trust_status == 'recognised' %}<span class="trust-badge recognised">✓ Recognised listing</span>{% endif %}
+      {% if school.is_seeded %}<span class="trust-badge directory">Public information</span>{% elif school.trust_status == 'recognised' %}<span class="trust-badge recognised">Recognised listing</span>{% endif %}
       {% if school.trust_status == 'official' %}<span class="trust-badge official">✓ Institution confirmed</span>{% endif %}
       {% if school.active_promotion_tier == 'vip' %}<span class="promo-badge vip">VIP · Sponsored</span>{% endif %}
       {% if school.active_promotion_tier == 'vvip' %}<span class="promo-badge vvip">VVIP · Featured</span>{% endif %}
     </div>
     <h3><a href="/school/{{ school.slug }}">{{ school.name }}</a></h3>
+    {% if school.image_credit and school.image_source_url %}<a class="photo-attribution" href="{{ school.image_source_url }}" target="_blank" rel="noopener">{{ school.image_credit }}</a>{% endif %}
     <p class="school-location">⌖ {{ join_nonempty([school.town, school.county]) or 'Kenya' }}</p>
     <p class="school-description">{{ school.description  or  'Explore the institution profile, location and contact details.' }}</p>
     <div class="school-meta">
@@ -18,6 +20,6 @@
       {% if school.accommodation %}<span>{{ school.accommodation }}</span>{% endif %}
       {% if school.gender %}<span>{{ school.gender }}</span>{% endif %}
     </div>
-    <a class="text-link" href="/school/{{ school.slug }}">View institution <span>→</span></a>
+    <a class="text-link" href="/school/{{ school.slug }}">View institution</a>
   </div>
 </article>

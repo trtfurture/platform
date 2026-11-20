@@ -11,7 +11,6 @@
 - [ ] Create the service from `render.yaml` using Render Blueprint.
 - [ ] Add a unique `ADMIN_USERNAME`.
 - [ ] Add a long, unique `ADMIN_PASSWORD` (not the example value).
-- [ ] Confirm `ADMIN_USERNAME` and `ADMIN_PASSWORD` are the only manually supplied admin secret variables; no additional session-secret variable is required.
 - [ ] Confirm the persistent disk is mounted at `/var/data`.
 - [ ] Confirm `PUBLIC_SITE_URL=https://schools.co.ke`.
 - [ ] Confirm `SIGNATURE_QR_URL=https://schools.co.ke` (or replace with the approved signature QR destination).
@@ -27,6 +26,10 @@
 
 ## Smoke tests
 - [ ] Homepage loads on mobile and desktop.
+- [ ] First deployment adds the public-information directory seed profiles without duplicating or overwriting existing institution records.
+- [ ] University directory lists the CUE-seeded universities; college directory filters and county filters return results.
+- [ ] Seeded institution cards show only attributed real photos or a non-photographic monogram placeholder.
+- [ ] No arrow glyphs remain in visible navigation, links or buttons.
 - [ ] Search works for name, location, ownership, level, boarding and category.
 - [ ] Private and public school filters return the expected records.
 - [ ] College and university pages work.

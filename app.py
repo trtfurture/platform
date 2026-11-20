@@ -57,6 +57,8 @@ SCHEMA=r'''
     description TEXT DEFAULT '',
     logo_path TEXT DEFAULT '',
     cover_path TEXT DEFAULT '',
+    image_credit TEXT DEFAULT '',
+    image_source_url TEXT DEFAULT '',
     video_url TEXT DEFAULT '',
     trust_status TEXT NOT NULL DEFAULT 'unverified',
     promotion_tier TEXT NOT NULL DEFAULT 'none',
@@ -137,6 +139,9 @@ with conn() as c:
  for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'")]:
   cols=[r['name'] for r in c.execute(f'PRAGMA table_info({table})')]
   if col not in cols: c.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
+ for col,definition in [('image_credit',"TEXT DEFAULT ''"),('image_source_url',"TEXT DEFAULT ''")]:
+  cols=[r['name'] for r in c.execute('PRAGMA table_info(schools)')]
+  if col not in cols: c.execute(f'ALTER TABLE schools ADD COLUMN {col} {definition}')
  c.executescript("CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at);")
 
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -162,14 +167,100 @@ def format_date(v):
  except:return ''
 def join_nonempty(items,sep=', '):return sep.join(str(x) for x in items if x)
 def filter_nonempty(items):return [x for x in items if x]
-app.jinja_env.globals.update(formatDate=format_date,join_nonempty=join_nonempty,filter_nonempty=filter_nonempty,phone_digits=lambda value: re.sub(r'[^0-9]','',str(value or '')),current_year=datetime.now().year)
+def institution_initials(name):
+ words=[w for w in re.split(r'\s+',str(name or '').strip()) if w]
+ return ''.join(w[0] for w in words[:2]).upper() or 'ED'
+app.jinja_env.globals.update(formatDate=format_date,join_nonempty=join_nonempty,filter_nonempty=filter_nonempty,institutionInitials=institution_initials,phone_digits=lambda value: re.sub(r'[^0-9]','',str(value or '')),current_year=datetime.now().year)
 COUNTIES=['Baringo','Bomet','Bungoma','Busia','Elgeyo-Marakwet','Embu','Garissa','Homa Bay','Isiolo','Kajiado','Kakamega','Kericho','Kiambu','Kilifi','Kirinyaga','Kisii','Kisumu','Kitui','Kwale','Laikipia','Lamu','Machakos','Makueni','Mandera','Marsabit','Meru','Migori','Mombasa','Murang’a','Nairobi','Nakuru','Nandi','Narok','Nyamira','Nyandarua','Nyeri','Samburu','Siaya','Taita-Taveta','Tana River','Tharaka-Nithi','Trans Nzoia','Turkana','Uasin Gishu','Vihiga','Wajir','West Pokot']
-SEED=[('Alliance High School','alliance-high-school','school','Public','Secondary','Kiambu','Kikuyu','Boarding','Boys','Secondary education','https://www.alliancehighschool.ac.ke/','A recognised Kenyan secondary school in Kikuyu, Kiambu County. This directory profile is an introductory listing; contact the school directly for current admissions, fees and requirements.'),('Strathmore School','strathmore-school','school','Private','Primary, Junior, Secondary','Nairobi','Lavington','Day','','Contact institution for current curriculum details','https://www.strathmore.ac.ke/','A private school located in Lavington, Nairobi. Explore its official website for current school-life, admissions and transfer information.'),('University of Nairobi','university-of-nairobi','university','Public','University','Nairobi','Nairobi','','Mixed','Degree and postgraduate programmes','https://www.uonbi.ac.ke/','A public university based in Nairobi with multiple campuses and academic programmes. Visit the official website for current courses, admissions and campus information.'),('Kenyatta University','kenyatta-university','university','Public','University','Nairobi','Kahawa','','Mixed','Degree and postgraduate programmes','https://www.ku.ac.ke/','A public university whose main campus is in Kahawa, Nairobi County. Visit the official university website for current programmes, admissions and campus details.'),('Kenya Utalii College','kenya-utalii-college','college','Public','College / TVET','Nairobi','Off Thika Road','','Mixed','Hospitality and tourism training','https://utalii.ac.ke/','A hospitality and tourism training institution with its main campus off Thika Road in Nairobi. Visit the official website for current programmes, admissions and campus information.')]
+def directory_seed(name, category, ownership='', county='', town='', levels='', accommodation='', gender='', curriculum='', website='', description='', source_note=''):
+ slug=slugify(name)
+ if not description:
+  description=f"Public-information directory profile for {name}. Confirm current admissions, programmes, fees and requirements directly with the institution."
+ if not source_note:
+  source_note="Public-information directory profile. The institution has not yet claimed or confirmed this profile on SCHOOLS."
+ return (name,slug,category,ownership,levels or ('University' if category=='university' else ('College / TVET' if category=='college' else 'Secondary')),county,town,accommodation,gender,curriculum,website,description,source_note)
+
+SEED=[]
+# Established schools: directory information only; not claimed or endorsed.
+SCHOOL_ROWS=[
+('Alliance High School','Public','Kiambu','Kikuyu','Boarding','Boys','https://www.alliancehighschool.ac.ke/'),
+('Strathmore School','Private','Nairobi','Lavington','Day','','https://www.strathmore.ac.ke/'),
+('Kenya High School','Public','Nairobi','Kileleshwa','Boarding','Girls',''),
+('Nairobi School','Public','Nairobi','Nairobi','Boarding','Boys',''),
+("Mang'u High School",'Public','Kiambu','Thika','Boarding','Boys','https://www.manguhigh.com/'),
+('Lenana School','Public','Nairobi','Dagoretti','Boarding','Boys',''),
+('Pangani Girls School','Public','Nairobi','Pangani','Boarding','Girls',''),
+('Moi Girls School Nairobi','Public','Nairobi','Nairobi','Boarding','Girls',''),
+('Maryhill Girls High School','Public','Kiambu','Thika','Boarding','Girls',''),
+('Loreto High School Limuru','Private','Kiambu','Limuru','Boarding','Girls',''),
+('Kapsabet Boys High School','Public','Nandi','Kapsabet','Boarding','Boys',''),
+('Maseno School','Public','Kisumu','Maseno','Boarding','Boys',''),
+('Maranda High School','Public','Siaya','Bondo','Boarding','Boys',''),
+('Friends School Kamusinga','Public','Bungoma','Kimilili','Boarding','Boys',''),
+('Starehe Boys Centre and School','Private','Nairobi','Nairobi','Boarding','Boys',''),
+('Brookhouse School','Private','Nairobi','Karen','Day','Mixed',''),
+('Braeburn School','Private','Nairobi','Garden Estate','Day','Mixed',''),
+('Aga Khan Academy Nairobi','Private','Nairobi','Nairobi','Day','Mixed',''),
+('Riara School','Private','Nairobi','Riara Road','Day','Mixed',''),
+('Light International School','Private','Nairobi','Nairobi','Day','Mixed',''),
+('Precious Blood Riruta','Private','Nairobi','Riruta','Boarding','Girls',''),
+('Bishop Gatimu Ngandu Girls High School','Public','Nyeri','Nyeri','Boarding','Girls',''),
+('Nakuru High School','Public','Nakuru','Nakuru','Boarding','Boys',''),
+('Moi High School Kabarak','Private','Nakuru','Kabarak','Boarding','Mixed','')]
+for name,own,county,town,accom,gender,web in SCHOOL_ROWS:
+ SEED.append(directory_seed(name,'school',own,county,town,'Secondary',accom,gender,'Secondary education',web))
+# Major public TVET and specialist colleges.
+COLLEGE_ROWS=[
+('Kenya Utalii College','Nairobi','Nairobi','Hospitality and tourism training','https://utalii.ac.ke/'),
+('Kenya Medical Training College','Nairobi','Nairobi','Medical training','https://kmtc.ac.ke/'),
+('The Nairobi National Polytechnic','Nairobi','Nairobi','Technical and vocational training',''),
+('Kabete National Polytechnic','Nairobi','Kabete','Technical and vocational training',''),
+('Kenya Coast National Polytechnic','Mombasa','Mombasa','Technical and vocational training',''),
+('The Kisumu National Polytechnic','Kisumu','Kisumu','Technical and vocational training',''),
+('The Eldoret National Polytechnic','Uasin Gishu','Eldoret','Technical and vocational training',''),
+('Rift Valley Institute of Science and Technology','Nakuru','Nakuru','Technical and vocational training',''),
+('Nyeri National Polytechnic','Nyeri','Nyeri','Technical and vocational training',''),
+('Meru National Polytechnic','Meru','Meru','Technical and vocational training',''),
+('Sigalagala National Polytechnic','Kakamega','Sigalagala','Technical and vocational training',''),
+('Kisii National Polytechnic','Kisii','Kisii','Technical and vocational training',''),
+('Kenya Institute of Mass Communication','Nairobi','Nairobi','Media and communication training',''),
+('Kenya Institute of Special Education','Nairobi','Nairobi','Special needs education training','https://kise.ac.ke/')]
+for name,county,town,focus,web in COLLEGE_ROWS:
+ SEED.append(directory_seed(name,'college','Public',county,town,'College / TVET','', 'Mixed',focus,web))
+# CUE approved public/private chartered universities as at 5 November 2026.
+CUE_SOURCE='https://www.cue.or.ke/index.php?Itemid=511&download=294%3Aapproved-universities-15th-september-2026&id=81%3Aapproved-academic-programmes-dec-2023&option=com_phocadownload&view=category'
+CUE_NOTE='Listed in the Commission for University Education approved-universities publication dated 5 November 2026. This SCHOOLS profile is independent and is not operated or endorsed by CUE; confirm current programme accreditation directly.'
+PUBLIC_UNIVERSITIES=['University of Nairobi','Moi University','Kenyatta University','Egerton University','Jomo Kenyatta University of Agriculture and Technology','Maseno University','Masinde Muliro University of Science and Technology','Dedan Kimathi University of Technology','Chuka University','Technical University of Kenya','Technical University of Mombasa','Pwani University','Kisii University','University of Eldoret','Maasai Mara University','Jaramogi Oginga Odinga University of Science and Technology','Laikipia University','South Eastern Kenya University','Meru University of Science and Technology','Multimedia University of Kenya','University of Kabianga','Karatina University','Kibabii University','Rongo University','The Co-operative University of Kenya','Taita Taveta University',"Murang'a University of Technology",'University of Embu','Machakos University','Kirinyaga University','Garissa University','Alupe University','Kaimosi Friends University','Tom Mboya University','Tharaka University','Bomet University']
+PRIVATE_UNIVERSITIES=['University of Eastern Africa, Baraton','Catholic University of Eastern Africa','Daystar University','Scott Christian University','United States International University','Africa Nazarene University','Kenya Methodist University',"St. Paul's University",'Pan Africa Christian University','Strathmore University','Kabarak University','Mount Kenya University','Africa International University','Kenya Highlands Evangelical University','Great Lakes University of Kisumu','KCA University','Adventist University of Africa','KAG EAST University','Umma University','Presbyterian University of East Africa','Aga Khan University',"Kiriri Women's University of Science and Technology",'The East African University','Zetech University','Lukenya University','Management University of Africa','Tangaza University','Islamic University of Kenya','Riara University','Uzima University','Gretsa University','Amref International University','International Leadership University']
+for name in PUBLIC_UNIVERSITIES:
+ SEED.append(directory_seed(name,'university','Public',levels='University',curriculum='Degree and postgraduate programmes',source_note=CUE_NOTE))
+for name in PRIVATE_UNIVERSITIES:
+ SEED.append(directory_seed(name,'university','Private',levels='University',curriculum='Degree and postgraduate programmes',source_note=CUE_NOTE))
+for name,own in [('Turkana University College','Public'),('Koitaleel Samoei University College','Public'),('Mama Ngina University College','Public'),('Nyandarua University College','Public'),('Kabarnet University College','Public'),('Makueni University College','Public'),('Kerio Valley University College','Public'),('Hekima University College','Private'),('Marist International University College','Private')]:
+ SEED.append(directory_seed(name,'college',own,levels='University constituent college',curriculum='University-level programmes',source_note=CUE_NOTE))
+
+# Add only missing records. Never overwrite profiles that an institution or admin has edited.
 with conn() as c:
- if c.execute('SELECT COUNT(*) FROM schools').fetchone()[0]==0:
-  for r in SEED:
-   name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc=r; t=now()
-   c.execute("INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,website,description,trust_status,promotion_tier,status,source_note,is_seeded,posted_at,expires_at,last_renewed_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'recognised','none','published',?,1,?,'',?,?,?)",(name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc,'Recognised public-information listing. The institution has not yet claimed or confirmed this profile on SCHOOLS.',t,t,t,t))
+ for r in SEED:
+  name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc,source_note=r
+  if c.execute('SELECT 1 FROM schools WHERE slug=?',(slug,)).fetchone(): continue
+  t=now()
+  c.execute("""INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,website,description,trust_status,promotion_tier,status,source_note,is_seeded,posted_at,expires_at,last_renewed_at,created_at,updated_at)
+  VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'unverified','none','published',?,1,?,'',?,?,?)""",
+  (name,slug,cat,own,levels,county,town,accom,gender,curr,web,desc,source_note,t,t,t,t))
+ # Old auto-seeded "recognised" badges could be mistaken for institutional verification.
+ c.execute("""UPDATE schools SET trust_status='unverified', source_note=CASE WHEN source_note='' OR source_note LIKE 'Recognised public-information%' THEN 'Public-information directory profile. The institution has not yet claimed or confirmed this profile on SCHOOLS.' ELSE source_note END WHERE is_seeded=1 AND trust_status='recognised'""")
+ # Two real, directly attributed CC BY-SA 4.0 campus photographs from Wikimedia Commons.
+ c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='alliance-high-school' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
+ ('https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/New_Complex_at_Alliance_High_School.jpg/1280px-New_Complex_at_Alliance_High_School.jpg','Photo: Hansie453, “New Complex at Alliance High School” (2016), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:New_Complex_at_Alliance_High_School.jpg'))
+ c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='kenya-high-school' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
+ ('https://upload.wikimedia.org/wikipedia/commons/c/cb/The_Kenya_High_School_Main_Gate.jpg','Photo: Lilly Stein, “The Kenya High School Main Gate” (2017), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:The_Kenya_High_School_Main_Gate.jpg'))
+ c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='mang-u-high-school' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
+ ('https://upload.wikimedia.org/wikipedia/commons/e/e1/Mang%27u_High_School.png','Photo: Anthony Mudhoka, “Mang’u High School” (2018), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:Mang%27u_High_School.png'))
+ c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='university-of-nairobi' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
+ ('https://upload.wikimedia.org/wikipedia/commons/1/16/University_of_Nairobi%2C_Kenya.jpg','Photo: EstherWikipedian, “University of Nairobi, Kenya” (2023), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:University_of_Nairobi,_Kenya.jpg'))
+ c.execute("""UPDATE schools SET cover_path=?,image_credit=?,image_source_url=? WHERE slug='kenyatta-university' AND is_seeded=1 AND (cover_path='' OR cover_path LIKE '%school-hero.webp')""",
+ ('https://upload.wikimedia.org/wikipedia/commons/thumb/2/2f/KenyattaUnivAdmin.jpg/1280px-KenyattaUnivAdmin.jpg','Photo: Thorkild Tylleskar, “Kenyatta University Central Administration Complex” (2016), Wikimedia Commons, CC BY-SA 4.0.','https://commons.wikimedia.org/wiki/File:KenyattaUnivAdmin.jpg'))
 
 def active_schools(where='',params=()):
  t=now()
@@ -189,7 +280,7 @@ def base_context():
  qrurl=os.environ.get('SIGNATURE_QR_URL',SITE+'/?source=toror-signature-qr')
  qr=qrcode.QRCode(box_size=3,border=1); qr.add_data(qrurl); qr.make(fit=True); im=qr.make_image(fill_color='#17324d',back_color='white'); bio=BytesIO(); im.save(bio,format='PNG')
  from base64 import b64encode
- return dict(siteName='SCHOOLS',siteUrl=SITE,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Discover Schools, Colleges & Universities in Kenya | SCHOOLS',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=SITE+('/' if path=='/' else path),pageImage=SITE+'/images/school-hero.webp',isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'SCHOOLS','url':SITE,'description':'Find and compare schools, colleges and universities across Kenya.','potentialAction':{'@type':'SearchAction','target':SITE+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
+ return dict(siteName='SCHOOLS',siteUrl=SITE,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Discover Schools, Colleges & Universities in Kenya | SCHOOLS',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=SITE+('/' if path=='/' else path),pageImage=SITE+'/images/schools-icon-512.png',isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'SCHOOLS','url':SITE,'description':'Find and compare schools, colleges and universities across Kenya.','potentialAction':{'@type':'SearchAction','target':SITE+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
 def page(template,**kwargs):
  ctx=base_context(); ctx.update(kwargs)
  if template=='directory':
@@ -258,7 +349,20 @@ def health():
 def home():
  with conn() as c:
   counts={k:c.execute('SELECT COUNT(*) FROM schools WHERE status="published"'+(f' AND category="{cat}"' if cat else '')).fetchone()[0] for k,cat in [('allCount',''),('schoolCount','school'),('collegeCount','college'),('universityCount','university')]}
- featured=feature_rotation(active_schools(),4); vvip=feature_rotation(active_schools("AND promotion_tier='vvip' AND promotion_expires_at>?",[now()]),3)
+ featured=[]
+ for category in ('school','college','university'):
+  rows=active_schools('AND category=?',[category])
+  if rows:
+   # Prefer an institution with a real credited photograph when selecting the first school card.
+   chosen=next((row for row in rows if row.get('cover_path') and (not row.get('is_seeded') or (row.get('image_credit') and row.get('image_source_url')))),rows[0])
+   featured.append(chosen)
+ if len(featured)<4:
+  used={row['id'] for row in featured}
+  for row in active_schools():
+   if row['id'] not in used:
+    featured.append(row); used.add(row['id'])
+   if len(featured)>=4: break
+ featured=feature_rotation(featured,4); vvip=feature_rotation(active_schools("AND promotion_tier='vvip' AND promotion_expires_at>?",[now()]),3)
  return page('home',featured=featured,vvip=vvip,counts=counts)
 @app.get('/schools')
 def schools():
@@ -303,10 +407,18 @@ def school_profile(slug):
   if not row or row['status']!='published' or (not row['is_seeded'] and row['expires_at'] and row['expires_at']<=t):abort(404)
   c.execute('UPDATE schools SET views=views+1 WHERE id=?',(row['id'],)); school=dict(row)
  related=active_schools('AND id<>? AND (county=? OR category=?)',[school['id'],school['county'],school['category']])[:4]
- try:photos=json.loads(school.get('photos_json') or '[]')
- except:photos=[]
- if not photos and school.get('cover_path'):photos=[school['cover_path']]
- ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | SCHOOLS",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=SITE+'/school/'+slug,school=school,related=related,photos=photos,enquirySent=request.args.get('enquiry')=='sent',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':SITE+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':SITE+(school.get('cover_path') or '/images/school-hero.webp')})
+ cover=school.get('cover_path') or ''
+ if school.get('is_seeded'):
+  # Seeded institution profiles show only photographs with explicit source and licence attribution.
+  photos=[cover] if cover and school.get('image_credit') and school.get('image_source_url') else []
+ else:
+  try:photos=json.loads(school.get('photos_json') or '[]')
+  except:photos=[]
+  photos=[photo for photo in photos if isinstance(photo,str) and photo.strip() and '/images/school-hero.webp' not in photo]
+  if cover and '/images/school-hero.webp' not in cover and cover not in photos:photos.insert(0,cover)
+ image_path=cover if cover and (not school.get('is_seeded') or (school.get('image_credit') and school.get('image_source_url'))) and '/images/school-hero.webp' not in cover else '/images/schools-icon-512.png'
+ image_url=image_path if image_path.startswith(('http://','https://')) else SITE+image_path
+ ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | SCHOOLS",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=SITE+'/school/'+slug,pageImage=image_url,school=school,related=related,photos=photos,enquirySent=request.args.get('enquiry')=='sent',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':SITE+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':image_url})
  return render_template('school.html',**ctx)
 @app.post('/school/<slug>/enquiry')
 @limiter.limit('8 per hour')

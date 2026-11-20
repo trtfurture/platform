@@ -1,5 +1,5 @@
-const CACHE_NAME = 'schools-shell-v2';
-const SHELL = ['/', '/css/site.css', '/js/app.js', '/manifest.webmanifest', '/images/schools-mark.svg', '/images/school-hero.webp', '/offline.html'];
+const CACHE_NAME = 'schools-shell-v3';
+const SHELL = ['/', '/css/site.css', '/js/app.js', '/manifest.webmanifest', '/images/schools-mark.svg', '/offline.html'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
