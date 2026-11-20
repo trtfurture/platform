@@ -1,0 +1,28 @@
+{% include 'partials/head.html' %}
+{% include 'partials/header.html' %}
+{% include 'partials/promo-strip.html' %}
+<main>
+  <section class="page-hero"><div class="container"><div class="eyebrow">SCHOOLS · COLLEGES · UNIVERSITIES</div><h1>{{ title }}</h1><p>{{ intro }}</p></div></section>
+  <section class="container directory-layout">
+    <aside class="filter-panel"><div class="filter-title"><strong>Refine your search</strong><a href="/schools">Reset</a></div>
+      <form action="/schools" method="get" class="filter-form">
+        <label>Keyword<input type="search" name="q" value="{{ filters.q  or  '' }}" placeholder="Name or location"></label>
+        <label>Institution type<select name="category"><option value="">All types</option><option value="school" {{ ('selected' if filters.category=='school' else '') }}>Schools</option><option value="college" {{ ('selected' if filters.category=='college' else '') }}>Colleges / TVET</option><option value="university" {{ ('selected' if filters.category=='university' else '') }}>Universities</option></select></label>
+        <label>County<select name="county"><option value="">All counties</option>{% for county in counties %}<option value="{{ county }}" {{ ('selected' if filters.county==county else '') }}>{{ county }}</option>{% endfor %}</select></label>
+        <label>Ownership<select name="ownership"><option value="">Any</option><option value="Private" {{ ('selected' if filters.ownership=='Private' else '') }}>Private</option><option value="Public" {{ ('selected' if filters.ownership=='Public' else '') }}>Public</option></select></label>
+        <label>Level<select name="level"><option value="">Any level</option><option value="Pre-primary" {{ ('selected' if filters.level=='Pre-primary' else '') }}>Pre-primary</option><option value="Primary" {{ ('selected' if filters.level=='Primary' else '') }}>Primary</option><option value="Junior" {{ ('selected' if filters.level=='Junior' else '') }}>Junior school</option><option value="Secondary" {{ ('selected' if filters.level=='Secondary' else '') }}>Secondary</option><option value="University" {{ ('selected' if filters.level=='University' else '') }}>University</option></select></label>
+        <label>Accommodation<select name="accommodation"><option value="">Any</option><option value="Day" {{ ('selected' if filters.accommodation=='Day' else '') }}>Day</option><option value="Boarding" {{ ('selected' if filters.accommodation=='Boarding' else '') }}>Boarding</option><option value="Day and boarding" {{ ('selected' if filters.accommodation=='Day and boarding' else '') }}>Day and boarding</option></select></label>
+        <label>Gender<select name="gender"><option value="">Any</option><option value="Boys" {{ ('selected' if filters.gender=='Boys' else '') }}>Boys</option><option value="Girls" {{ ('selected' if filters.gender=='Girls' else '') }}>Girls</option><option value="Mixed" {{ ('selected' if filters.gender=='Mixed' else '') }}>Mixed</option></select></label>
+        <label>Town / area<input type="search" name="town" value="{{ filters.town  or  '' }}" placeholder="e.g. Ruiru"></label>
+        <label>Curriculum / programme<input type="search" name="curriculum" value="{{ filters.curriculum  or  '' }}" placeholder="e.g. CBC, nursing"></label>
+        <button class="button button-dark full-width" type="submit">Apply filters</button>
+      </form>
+      <div class="sidebar-ad"><span class="eyebrow">CAMPUS LIVING</span><h3>Looking for a place to stay?</h3><p>Discover hostels and rentals near campuses.</p><a href="/campus-living">Explore accommodation →</a></div>
+    </aside>
+    <section class="directory-results"><div class="results-top"><div><strong>{{ schools|length }}</strong> institution{{ ('' if schools|length==1 else 's') }} found</div><span>Sponsored placements are labelled</span></div>
+      {% if schools|length %}<div class="school-grid directory-grid">{% for school in schools %}{% include 'partials/school-card.html' %}{% endfor %}</div>{% else %}<div class="empty-state"><span>⌕</span><h3>No matching institutions yet</h3><p>Try a different county, category or search term. You can also request an institution to be added.</p><a class="button button-outline" href="/advertise">Add an institution</a></div>{% endif %}
+      <div class="results-note">Institution details can change. Please contact the institution directly to confirm admissions, fees and availability.</div>
+    </section>
+  </section>
+</main>
+{% include 'partials/footer.html' %}

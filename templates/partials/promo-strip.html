@@ -1,0 +1,3 @@
+{% if globalPromos  and  globalPromos|length %}
+<section class="cross-promo" aria-label="Featured sponsored institutions"><div class="container cross-promo-inner"><div class="cross-promo-label"><span class="promo-badge vvip">VVIP · SPONSORED</span><strong>Featured across SCHOOLS</strong></div><div class="cross-promo-items">{% for item in globalPromos %}<a href="/school/{{ item.slug }}"><strong>{{ item.name }}</strong><small>{{ join_nonempty(['University' if item.category == 'university' else ('College / TVET' if item.category == 'college' else 'School'), item.town, item.county], ' · ') }}</small></a>{% endfor %}</div></div></section>
+{% endif %}

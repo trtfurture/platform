@@ -1,13 +1,13 @@
 services:
   - type: web
     name: schools-ke-platform
-    runtime: node
+    runtime: python
     plan: starter
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --threads 8 --timeout 120
     healthCheckPath: /healthz
     envVars:
-      - key: NODE_ENV
+      - key: FLASK_ENV
         value: production
       - key: DATA_DIR
         value: /var/data
