@@ -383,7 +383,7 @@ apply_real_photo_defaults()
 
 def active_schools(where='',params=()):
  t=now()
- with conn() as c:return [dict(x) for x in c.execute(f"SELECT *, CASE WHEN promotion_tier <> 'none' AND promotion_expires_at > ? THEN promotion_tier ELSE 'none' END AS active_promotion_tier FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) {where} ORDER BY CASE WHEN promotion_tier='vvip' AND promotion_expires_at>? THEN 0 WHEN promotion_tier='vip' AND promotion_expires_at>? THEN 1 ELSE 2 END, CASE WHEN cover_path IS NOT NULL AND TRIM(cover_path)<>'' THEN 0 ELSE 1 END, COALESCE(last_featured_at,'') ASC, name COLLATE NOCASE ASC",(t,t,t,t,*params)).fetchall()]
+ with conn() as c:return [dict(x) for x in c.execute(f"SELECT *, CASE WHEN promotion_tier <> 'none' AND promotion_expires_at > ? THEN promotion_tier ELSE 'none' END AS active_promotion_tier FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) {where} ORDER BY CASE WHEN promotion_tier='vvip' AND promotion_expires_at>? THEN 0 WHEN promotion_tier='vip' AND promotion_expires_at>? THEN 1 ELSE 2 END, CASE WHEN cover_path IS NOT NULL AND TRIM(cover_path)<>'' THEN 0 ELSE 1 END, COALESCE(last_featured_at,'') ASC, name COLLATE NOCASE ASC",(t,t,*params,t,t)).fetchall()]
 def feature_rotation(rows,limit=4):
  picked=rows[:limit]; stamp=datetime.now(timezone.utc)
  with conn() as c:
