@@ -16,9 +16,42 @@ from io import BytesIO
 BASE=Path(__file__).resolve().parent
 load_dotenv(BASE/'.env')
 PROD=os.environ.get('RENDER')=='true' or bool(os.environ.get('RENDER_EXTERNAL_URL')) or os.environ.get('FLASK_ENV')=='production'
-DATA_DEFAULT='/var/data' if PROD else str(BASE/'storage')
-DATA=Path(DATA_DEFAULT).resolve(); UPLOAD=DATA/'uploads'; BACKUP=DATA/'backups'
-for p in (DATA,UPLOAD,BACKUP): p.mkdir(parents=True,exist_ok=True)
+
+# Prefer Render's persistent disk when it is actually mounted and writable.
+# Free Render instances do not have persistent disks; in that case use a
+# project-local directory so the web process can start, while warning that
+# local files are ephemeral until a persistent disk is attached.
+def _writable_directory(path):
+ try:
+  path.mkdir(parents=True,exist_ok=True)
+  probe=path/f'.schools-write-check-{os.getpid()}'
+  fd=os.open(str(probe),os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+  os.close(fd)
+  probe.unlink(missing_ok=True)
+  return True
+ except OSError:
+  return False
+
+configured_data=os.environ.get('DATA_DIR','').strip()
+if configured_data:
+ candidate=Path(configured_data).expanduser().resolve()
+else:
+ candidate=Path('/var/data') if PROD else (BASE/'storage')
+ candidate=candidate.resolve()
+if _writable_directory(candidate):
+ DATA=candidate
+ if PROD and DATA == Path('/var/data'):
+  print('SCHOOLS storage: using Render persistent disk at /var/data.')
+elif PROD and candidate == Path('/var/data'):
+ DATA=(BASE/'storage').resolve()
+ if not _writable_directory(DATA):
+  raise RuntimeError('Render disk /var/data is not writable and project-local storage could not be created. Attach a writable persistent disk mounted at /var/data.')
+ print('WARNING: /var/data is not mounted/writable. SCHOOLS is using temporary project-local storage. Database, uploads, backups and session key may be lost on restart or redeploy. Attach a persistent disk at /var/data for production.')
+else:
+ raise RuntimeError(f'SCHOOLS storage directory is not writable: {candidate}. Attach a writable Render persistent disk or correct DATA_DIR.')
+UPLOAD=DATA/'uploads'; BACKUP=DATA/'backups'
+for folder in (UPLOAD,BACKUP):
+ folder.mkdir(parents=True,exist_ok=True)
 PORT=int(os.environ.get('PORT','10000'))
 SITE=(os.environ.get('RENDER_EXTERNAL_URL') or ('https://schoolskenya.onrender.com' if PROD else f'http://localhost:{PORT}')).rstrip('/')
 ADMIN_USERNAME=os.environ.get('ADMIN_USERNAME','admin')
