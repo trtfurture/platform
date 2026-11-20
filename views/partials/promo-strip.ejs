@@ -1,0 +1,3 @@
+<% if (globalPromos && globalPromos.length) { %>
+<section class="cross-promo" aria-label="Featured sponsored institutions"><div class="container cross-promo-inner"><div class="cross-promo-label"><span class="promo-badge vvip">VVIP · SPONSORED</span><strong>Featured across SCHOOLS</strong></div><div class="cross-promo-items"><% globalPromos.forEach((item) => { %><a href="/school/<%= item.slug %>"><strong><%= item.name %></strong><small><%= [item.category === 'university' ? 'University' : item.category === 'college' ? 'College / TVET' : 'School', item.town, item.county].filter(Boolean).join(' · ') %></small></a><% }) %></div></div></section>
+<% } %>

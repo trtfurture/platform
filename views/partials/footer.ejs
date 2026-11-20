@@ -1,0 +1,23 @@
+<footer class="site-footer">
+  <div class="container footer-top">
+    <div class="footer-brand-block">
+      <a class="brand brand-footer" href="/"><span class="brand-mark">S<span>.</span></span><span class="brand-copy"><strong>SCHOOLS</strong><small>FIND YOUR NEXT STEP</small></span></a>
+      <p>Discover schools, colleges and universities. Compare options, explore campuses and connect directly with institutions.</p>
+    </div>
+    <div><h4>Explore</h4><a href="/schools">All institutions</a><a href="/directory/school">Schools</a><a href="/directory/college">Colleges & TVET</a><a href="/directory/university">Universities</a></div>
+    <div><h4>For institutions</h4><a href="/advertise">Advertise with us</a><a href="/school-portal">Get a school portal</a><a href="/campus-living">Campus accommodation</a><a href="/about">About SCHOOLS</a></div>
+    <div class="footer-signature">
+      <h4>Our signature</h4>
+      <% if (qrData) { %><img src="<%= qrData %>" alt="SCHOOLS signature QR code" width="104" height="104"><% } else { %><div class="qr-placeholder">S.</div><% } %>
+      <small>Scan to discover institutions</small>
+    </div>
+  </div>
+  <div class="container footer-bottom">
+    <span>© <%= new Date().getFullYear() %> SCHOOLS. All rights reserved.</span>
+    <span>Powered by <strong>Toror Technology and Innovations Limited</strong></span>
+    <span><a href="/privacy">Privacy</a> · <a href="/about">About</a></span>
+  </div>
+</footer>
+<script src="/js/app.js" defer></script>
+</body>
+</html>

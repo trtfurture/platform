@@ -1,0 +1,23 @@
+<article class="school-card">
+  <a class="school-card-image" href="/school/<%= school.slug %>">
+    <img src="<%= school.cover_path || '/images/school-hero.webp' %>" alt="Campus view for <%= school.name %>" loading="lazy">
+    <span class="card-category"><%= school.category === 'university' ? 'University' : school.category === 'college' ? 'College / TVET' : (school.levels || 'School') %></span>
+  </a>
+  <div class="school-card-body">
+    <div class="badge-row">
+      <% if (school.trust_status === 'recognised') { %><span class="trust-badge recognised">✓ Recognised listing</span><% } %>
+      <% if (school.trust_status === 'official') { %><span class="trust-badge official">✓ Institution confirmed</span><% } %>
+      <% if (school.active_promotion_tier === 'vip') { %><span class="promo-badge vip">VIP · Sponsored</span><% } %>
+      <% if (school.active_promotion_tier === 'vvip') { %><span class="promo-badge vvip">VVIP · Featured</span><% } %>
+    </div>
+    <h3><a href="/school/<%= school.slug %>"><%= school.name %></a></h3>
+    <p class="school-location">⌖ <%= [school.town, school.county].filter(Boolean).join(', ') || 'Kenya' %></p>
+    <p class="school-description"><%= school.description || 'Explore the institution profile, location and contact details.' %></p>
+    <div class="school-meta">
+      <% if (school.ownership) { %><span><%= school.ownership %></span><% } %>
+      <% if (school.accommodation) { %><span><%= school.accommodation %></span><% } %>
+      <% if (school.gender) { %><span><%= school.gender %></span><% } %>
+    </div>
+    <a class="text-link" href="/school/<%= school.slug %>">View institution <span>→</span></a>
+  </div>
+</article>
