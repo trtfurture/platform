@@ -183,6 +183,49 @@ SCHEMA=r'''
     expires_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS visitor_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    visitor_key TEXT NOT NULL,
+    user_agent TEXT DEFAULT '',
+    referrer TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS site_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS contact_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    subject TEXT DEFAULT '',
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new',
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS customer_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    email TEXT DEFAULT '',
+    phone TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(phone)
+  );
+  CREATE TABLE IF NOT EXISTS payment_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,
+    purpose TEXT NOT NULL,
+    tier TEXT DEFAULT '',
+    amount TEXT DEFAULT '',
+    reference TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    notes TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(account_id) REFERENCES customer_accounts(id)
+  );
+
   CREATE TABLE IF NOT EXISTS portal_enquiries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contact_name TEXT NOT NULL,
@@ -196,10 +239,11 @@ SCHEMA=r'''
 with conn() as c:
  c.execute('PRAGMA journal_mode=WAL')
  c.executescript(SCHEMA)
- for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'")]:
+ for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'"),('schools','owner_account_id',"INTEGER"),('properties','owner_account_id',"INTEGER")]:
   cols=[r['name'] for r in c.execute(f'PRAGMA table_info({table})')]
   if col not in cols: c.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
- c.executescript("CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at);")
+ c.execute("DELETE FROM admin_errors WHERE route='/pulse_receiver' AND message LIKE '%405 Method Not Allowed%'")
+ c.executescript("CREATE INDEX IF NOT EXISTS idx_visitors_created ON visitor_events(created_at); CREATE INDEX IF NOT EXISTS idx_visitors_path ON visitor_events(path); CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at);")
 
 def now(): return datetime.now(timezone.utc).isoformat()
 def safe(v,n=5000): return str(v or '').strip()[:n]
@@ -212,6 +256,17 @@ def safe_url(v):
  if not v:return ''
  if not v.startswith(('http://','https://')):v='https://'+v
  return v if urlparse(v).scheme in ('http','https') and urlparse(v).netloc else ''
+def get_or_create_customer(name,phone,email=''):
+ name=safe(name,160); phone=safe(phone,60); email=safe(email,160)
+ if not name or not phone: raise ValueError('A contact name and phone number are required to create a customer account.')
+ with conn() as c:
+  row=c.execute('SELECT id FROM customer_accounts WHERE phone=?',(phone,)).fetchone()
+  if row:
+   c.execute('UPDATE customer_accounts SET full_name=?,email=? WHERE id=?',(name,email,row['id']))
+   return row['id']
+  cur=c.execute('INSERT INTO customer_accounts(full_name,email,phone,created_at) VALUES(?,?,?,?)',(name,email,phone,now()))
+  return cur.lastrowid
+
 def audit(action,typ='',rid=None,detail=''):
  with conn() as c:c.execute('INSERT INTO audit_events(action,record_type,record_id,detail,created_at) VALUES(?,?,?,?,?)',(action,typ,rid,safe(detail,1000),now()))
 def log_error(err,route=''):
@@ -396,24 +451,30 @@ def base_context():
  if not path.startswith('/admin') and path!='/':
   with conn() as c: rows=[dict(x) for x in c.execute("SELECT * FROM schools WHERE status='published' AND promotion_tier='vvip' AND promotion_expires_at>? AND (expires_at='' OR expires_at IS NULL OR expires_at>?) ORDER BY COALESCE(last_featured_at,'') ASC LIMIT 8",(t,t)).fetchall()]
   promos=feature_rotation(rows,3)
+ with conn() as c: public_settings={r['key']:r['value'] for r in c.execute("SELECT key,value FROM site_settings WHERE key IN ('business_name','contact_email','contact_phone','whatsapp','payment_instructions','mpesa_paybill','mpesa_till','mpesa_account','public_address')")}
  site=current_site(); qrurl=site+'/?source=toror-signature-qr'
  qr=qrcode.QRCode(box_size=3,border=1); qr.add_data(qrurl); qr.make(fit=True); im=qr.make_image(fill_color='#17324d',back_color='white'); bio=BytesIO(); im.save(bio,format='PNG')
  from base64 import b64encode
- return dict(siteName='SCHOOLS',siteUrl=site,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Discover Schools, Colleges & Universities in Kenya | SCHOOLS',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=site+('/' if path=='/' else path),pageImage=HERO_PHOTO['url'],heroCredit=photo_attribution(HERO_PHOTO['url']),isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'SCHOOLS','url':site,'description':'Find and compare schools, colleges and universities across Kenya.','potentialAction':{'@type':'SearchAction','target':site+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
+ return dict(publicSettings=public_settings,siteName='Kenya Schools',siteUrl=site,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Kenya Schools | Find Schools, Colleges & Universities',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=site+('/' if path=='/' else path),pageImage=site+'/images/kenya-schools-profile.jpg',heroCredit=photo_attribution(HERO_PHOTO['url']),isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'Kenya Schools','url':site,'description':'Find and compare schools, colleges and universities across Kenya.','publisher':{'@type':'Organization','name':'Toror Technology and Innovations Limited','url':site,'logo':site+'/images/kenya-schools-profile.jpg'},'potentialAction':{'@type':'SearchAction','target':site+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
 def page(template,**kwargs):
  ctx=base_context(); ctx.update(kwargs)
  if template=='directory':
-  ctx.setdefault('metaTitle', (kwargs.get('title') or 'Explore institutions')+' | SCHOOLS')
+  ctx.setdefault('metaTitle', (kwargs.get('title') or 'Explore institutions')+' | Kenya Schools')
   ctx.setdefault('metaDescription', (kwargs.get('intro') or 'Explore schools, colleges and universities across Kenya.')+' Compare institution profiles, locations, programmes and contact information.')
   ctx.setdefault('canonical', current_site()+request.path)
   if request.args: ctx['robots']='noindex,follow'
   if len(kwargs.get('schools',[]))<3 and request.path.startswith('/schools-in-'): ctx['robots']='noindex,follow'
+ elif template=='home':
+  ctx.update(metaTitle='Kenya Schools | Find Schools, Colleges & Universities Across Kenya',
+   metaDescription='Find schools in Kenya by name, county and education level. Explore primary and secondary schools, colleges, TVET institutions, universities and student accommodation.')
+ elif template=='contact':
+  ctx.update(metaTitle='Contact Kenya Schools',metaDescription='Contact the Kenya Schools team about institution listings, education information, school portals and campus accommodation.')
  elif template=='advertise':
-  ctx.update(metaTitle='Advertise Your School | Reach Parents Across Kenya',metaDescription='Create a school listing, showcase your campus, publish admissions information and reach parents and learners searching for institutions in Kenya.')
+  ctx.update(metaTitle='List Your Institution | Kenya Schools',metaDescription='Create a school listing, showcase your campus, publish admissions information and reach parents and learners searching for institutions in Kenya.')
  elif template=='portal':
-  ctx.update(metaTitle='Get a School Website & Portal | SCHOOLS',metaDescription='Get a modern school website with admissions pages, galleries, announcements and an easy content dashboard.')
+  ctx.update(metaTitle='Get a School Website & Portal | Kenya Schools',metaDescription='Get a modern school website with admissions pages, galleries, announcements and an easy content dashboard.')
  elif template=='campus':
-  ctx.update(metaTitle='Student Accommodation, Hostels & Rentals in Kenya | SCHOOLS',metaDescription='Explore student hostels, rental accommodation and campus-area services. Find places near colleges and universities.')
+  ctx.update(metaTitle='Student Accommodation, Hostels & Rentals in Kenya | Kenya Schools',metaDescription='Explore student hostels, rental accommodation and campus-area services. Find places near colleges and universities.')
  return render_template(template+'.html',**ctx)
 def error_page(title,message,status=400):return page('error',title=title,message=message),status
 def admin_required():
@@ -453,16 +514,50 @@ def maintenance_loop():
   time.sleep(3600)
 threading.Thread(target=maintenance_loop,daemon=True,name='schools-maintenance').start()
 
+@app.before_request
+def record_public_visit():
+ path=request.path or '/'
+ if path.startswith(('/admin','/static','/css','/js','/images','/uploads','/healthz','/pulse_receiver')) or path in ('/favicon.ico','/robots.txt','/sitemap.xml'):
+  return
+ if request.method != 'GET' or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+  return
+ agent=safe(request.user_agent.string,300).lower()
+ if any(token in agent for token in ('bot','crawler','spider','slurp','headless','uptime','monitoring')):
+  return
+ try:
+  # Daily pseudonymous key; no IP address is stored.
+  from hashlib import sha256
+  raw=(request.cookies.get('schools_visit') or secrets.token_urlsafe(24))
+  key=sha256(raw.encode()).hexdigest()
+  with conn() as c:
+   c.execute('INSERT INTO visitor_events(path,visitor_key,user_agent,referrer,created_at) VALUES(?,?,?,?,?)',
+    (path[:300],key,safe(request.user_agent.string,300),safe(request.referrer,500),now()))
+  request._visit_cookie=raw
+ except Exception as exc:
+  log_error(exc,'visitor-tracking')
+
+@app.route('/pulse_receiver', methods=['GET','POST','OPTIONS'])
+def pulse_receiver():
+ # Compatibility endpoint for older installed PWA clients; telemetry must never block browsing.
+ if request.method == 'OPTIONS':
+  response=make_response('',204)
+ else:
+  response=make_response('',204)
+ response.headers['Cache-Control']='no-store'
+ return response
+
 @app.after_request
 def security_headers(resp):
  resp.headers.setdefault('X-Content-Type-Options','nosniff'); resp.headers.setdefault('Referrer-Policy','strict-origin-when-cross-origin'); resp.headers.setdefault('X-Frame-Options','SAMEORIGIN'); resp.headers.setdefault('Permissions-Policy','camera=(), microphone=(), geolocation=()')
+ if hasattr(request,'_visit_cookie'):
+  resp.set_cookie('schools_visit',request._visit_cookie,max_age=31536000,httponly=True,samesite='Lax',secure=PROD)
  if PROD:resp.headers.setdefault('Strict-Transport-Security','max-age=31536000; includeSubDomains')
  return resp
 @app.get('/healthz')
 def health():
  try:
   with conn() as c:c.execute('SELECT 1')
-  return {'ok':True,'service':'schools-ke-platform','time':now()}
+  return {'ok':True,'service':'kenya-schools-platform','time':now()}
  except Exception as e:return {'ok':False},503
 @app.get('/')
 def home():
@@ -520,7 +615,7 @@ def school_profile(slug):
  try:photos=json.loads(school.get('photos_json') or '[]')
  except:photos=[]
  if not photos and school.get('cover_path'):photos=[school['cover_path']]
- ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | SCHOOLS",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=current_site()+'/school/'+slug,school=school,related=related,photos=photos,enquirySent=request.args.get('enquiry')=='sent',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':current_site()+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':(school.get('cover_path') if str(school.get('cover_path') or '').startswith(('http://','https://')) else current_site()+(school.get('cover_path') or '')) or HERO_PHOTO['url']})
+ ctx=base_context(); ctx.update(metaTitle=f"{school['name']} | {school['town'] or school['county']} | Kenya Schools",metaDescription=safe(school.get('description') or f"Explore {school['name']}, including its location, school information and contact details.",160),canonical=current_site()+'/school/'+slug,school=school,related=related,photos=photos,enquirySent=request.args.get('enquiry')=='sent',structured_data={'@context':'https://schema.org','@type':'CollegeOrUniversity' if school['category']=='university' else ('EducationalOrganization' if school['category']=='college' else 'School'),'name':school['name'],'url':current_site()+'/school/'+slug,'description':school.get('description'),'address':{'@type':'PostalAddress','addressLocality':school.get('town'),'addressRegion':school.get('county'),'addressCountry':'KE'},'telephone':school.get('phone'),'email':school.get('email'),'sameAs':[school['website']] if school.get('website') else [],'image':(school.get('cover_path') if str(school.get('cover_path') or '').startswith(('http://','https://')) else current_site()+(school.get('cover_path') or '')) or HERO_PHOTO['url']})
  return render_template('school.html',**ctx)
 @app.post('/school/<slug>/enquiry')
 @limiter.limit('8 per hour')
@@ -538,7 +633,9 @@ def advertise():return page('advertise',sent=request.args.get('sent')=='1')
 def advertise_post():
  if safe(request.form.get('website_confirm'),150):return redirect('/advertise?sent=1')
  name=safe(request.form.get('name'),160)
+ owner_name=safe(request.form.get('contact_name'),120); owner_phone=safe(request.form.get('phone'),60)
  if not name:return error_page('School name required','Please enter the institution name and submit again.')
+ if not owner_name or not owner_phone:return error_page('Contact details required','Enter the account holder name and phone number so the submission can be linked to a customer record.')
  photos=[]; files=request.files.getlist('photos')
  if len(files)>6:return error_page('Too many photos','Please upload no more than six photos.')
  for f in files:
@@ -549,9 +646,12 @@ def advertise_post():
   f.seek(0,2); size=f.tell(); f.seek(0)
   if size>8*1024*1024:return error_page('Image too large','Each photo must be 8MB or smaller.')
   fn=f"{int(time.time()*1000)}-{secrets.token_hex(5)}{ext}"; f.save(UPLOAD/fn); photos.append('/uploads/'+fn)
+ account_id=get_or_create_customer(owner_name,owner_phone,request.form.get('email',''))
  slug=slugify(name)+'-'+secrets.token_hex(2); tier=request.form.get('requested_tier','none'); tier=tier if tier in ('none','vip','vvip') else 'none'; t=now()
- vals=[name,slug,safe(request.form.get('category'),30) or 'school',safe(request.form.get('ownership'),40),safe(request.form.get('levels'),150),safe(request.form.get('county'),80),safe(request.form.get('town'),80),safe(request.form.get('accommodation'),40),safe(request.form.get('gender'),40),safe(request.form.get('curriculum'),100),safe(request.form.get('fees_range'),100),safe(request.form.get('address'),250),safe(request.form.get('phone'),60),safe(request.form.get('email'),160),safe_url(request.form.get('website')),safe(request.form.get('description'),2500),photos[0] if photos else '',json.dumps(photos),safe_url(request.form.get('video_url')),tier,t,t]
- with conn() as c:c.execute("INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,fees_range,address,phone,email,website,description,cover_path,photos_json,video_url,trust_status,promotion_tier,requested_tier,status,source_note,is_seeded,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unverified','none',?,'pending','Submitted by an institution representative; awaiting review.',0,?,?)",vals)
+ vals=[name,slug,safe(request.form.get('category'),30) or 'school',safe(request.form.get('ownership'),40),safe(request.form.get('levels'),150),safe(request.form.get('county'),80),safe(request.form.get('town'),80),safe(request.form.get('accommodation'),40),safe(request.form.get('gender'),40),safe(request.form.get('curriculum'),100),safe(request.form.get('fees_range'),100),safe(request.form.get('address'),250),safe(request.form.get('phone'),60),safe(request.form.get('email'),160),safe_url(request.form.get('website')),safe(request.form.get('description'),2500),photos[0] if photos else '',json.dumps(photos),safe_url(request.form.get('video_url')),tier,t,t,account_id]
+ with conn() as c:c.execute("INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,fees_range,address,phone,email,website,description,cover_path,photos_json,video_url,trust_status,promotion_tier,requested_tier,status,source_note,is_seeded,created_at,updated_at,owner_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unverified','none',?,'pending','',0,?,?,?)",vals)
+ with conn() as c:
+  c.execute("INSERT INTO payment_records(account_id,purpose,tier,status,notes,created_at) VALUES(?,?,?,?,?,?)",(account_id,'Institution promotion',tier,'awaiting_quote','Package requested; confirm price and payment instructions with customer.',now())) if tier in ('vip','vvip') else None
  audit('school_submitted','school',None,name); return redirect('/advertise?sent=1')
 @app.get('/school-portal')
 def portal():return page('portal',sent=request.args.get('sent')=='1')
@@ -572,11 +672,25 @@ def campus_post():
  if safe(request.form.get('website_confirm'),150):return redirect('/campus-living?sent=1')
  title=safe(request.form.get('title'),160)
  if not title:return error_page('Listing title required','Please enter a title for the accommodation listing.')
- vals=[title,safe(request.form.get('property_type'),80),safe(request.form.get('institution'),160),safe(request.form.get('county'),80),safe(request.form.get('town'),80),safe(request.form.get('price'),80),safe(request.form.get('contact'),80),safe(request.form.get('description'),1500),'pending',now()]
- with conn() as c:c.execute('INSERT INTO properties(title,property_type,institution,county,town,price,contact,description,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',vals)
+ contact_name=safe(request.form.get('contact_name'),120)
+ if not contact_name or not safe(request.form.get('contact'),60):return error_page('Contact details required','Enter the advertiser name and phone number so this listing can be linked to a customer record.')
+ account_id=get_or_create_customer(contact_name,request.form.get('contact'),request.form.get('email',''))
+ vals=[title,safe(request.form.get('property_type'),80),safe(request.form.get('institution'),160),safe(request.form.get('county'),80),safe(request.form.get('town'),80),safe(request.form.get('price'),80),safe(request.form.get('contact'),80),safe(request.form.get('description'),1500),'pending',now(),account_id]
+ with conn() as c:c.execute('INSERT INTO properties(title,property_type,institution,county,town,price,contact,description,status,created_at,owner_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',vals)
  audit('property_submitted','property',None,title); return redirect('/campus-living?sent=1')
 @app.get('/about')
 def about():return page('about')
+@app.get('/contact')
+def contact():return page('contact',sent=request.args.get('sent')=='1')
+@app.post('/contact')
+@limiter.limit('8 per hour')
+def contact_post():
+ if safe(request.form.get('website_confirm'),150):return redirect('/contact?sent=1')
+ name=safe(request.form.get('name'),120); message=safe(request.form.get('message'),2500)
+ if not name or len(message)<8:return error_page('Complete your message','Enter your name and a message of at least 8 characters.')
+ with conn() as c:c.execute('INSERT INTO contact_messages(name,email,phone,subject,message,status,created_at) VALUES(?,?,?,?,?,?,?)',(name,safe(request.form.get('email'),160),safe(request.form.get('phone'),60),safe(request.form.get('subject'),160),message,'new',now()))
+ audit('contact_message_received','contact',None,name)
+ return redirect('/contact?sent=1')
 @app.get('/privacy')
 def privacy():return page('privacy')
 @app.get('/admin/login')
@@ -609,13 +723,59 @@ def admin_dashboard():
   errors=[dict(x) for x in c.execute('SELECT * FROM admin_errors ORDER BY id DESC LIMIT 12').fetchall()]
   enquiries=[dict(x) for x in c.execute('SELECT e.*,s.name AS school_name FROM enquiries e LEFT JOIN schools s ON s.id=e.school_id ORDER BY e.id DESC LIMIT 20').fetchall()]
   portals=[dict(x) for x in c.execute('SELECT * FROM portal_enquiries ORDER BY id DESC LIMIT 20').fetchall()]
-  stats={k:c.execute(sql).fetchone()[0] for k,sql in [('schools',"SELECT COUNT(*) FROM schools WHERE status='published'"),('pending',"SELECT COUNT(*) FROM schools WHERE status='pending'"),('expired',"SELECT COUNT(*) FROM schools WHERE status='expired'"),('properties',"SELECT COUNT(*) FROM properties WHERE status='pending'"),('enquiries','SELECT COUNT(*) FROM enquiries')]}
- ctx=base_context(); ctx.update(robots='noindex,nofollow',metaTitle='Admin Dashboard | SCHOOLS',schools=schools,properties=props,errors=errors,enquiries=enquiries,portalEnquiries=portals,stats=stats); return render_template('admin-dashboard.html',**ctx)
+  messages=[dict(x) for x in c.execute('SELECT * FROM contact_messages ORDER BY id DESC LIMIT 30').fetchall()]
+  stats={k:c.execute(sql).fetchone()[0] for k,sql in [('schools',"SELECT COUNT(*) FROM schools WHERE status='published'"),('pending',"SELECT COUNT(*) FROM schools WHERE status='pending'"),('expired',"SELECT COUNT(*) FROM schools WHERE status='expired'"),('properties',"SELECT COUNT(*) FROM properties WHERE status='pending'"),('enquiries','SELECT COUNT(*) FROM enquiries'),('visitors_today',"SELECT COUNT(DISTINCT visitor_key) FROM visitor_events WHERE date(created_at)=date('now')"),('visits_today',"SELECT COUNT(*) FROM visitor_events WHERE date(created_at)=date('now')"),('visitors_total',"SELECT COUNT(DISTINCT visitor_key) FROM visitor_events"),('accounts','SELECT COUNT(*) FROM customer_accounts')]}
+  settings={r['key']:r['value'] for r in c.execute('SELECT key,value FROM site_settings')}
+  visitor_paths=[dict(x) for x in c.execute("SELECT path,COUNT(*) AS hits,COUNT(DISTINCT visitor_key) AS visitors FROM visitor_events WHERE created_at>=? GROUP BY path ORDER BY hits DESC LIMIT 12",((datetime.now(timezone.utc)-timedelta(days=7)).isoformat(),)).fetchall()]
+  visitor_days=[dict(x) for x in c.execute("SELECT date(created_at) AS day,COUNT(DISTINCT visitor_key) AS visitors,COUNT(*) AS views FROM visitor_events WHERE created_at>=? GROUP BY date(created_at) ORDER BY day DESC LIMIT 14",((datetime.now(timezone.utc)-timedelta(days=14)).isoformat(),)).fetchall()]
+  accounts=[dict(x) for x in c.execute('SELECT * FROM customer_accounts ORDER BY id DESC LIMIT 30').fetchall()]
+  payments=[dict(x) for x in c.execute("SELECT p.*,a.full_name,a.phone,a.email FROM payment_records p LEFT JOIN customer_accounts a ON a.id=p.account_id ORDER BY p.id DESC LIMIT 30").fetchall()]
+
+ ctx=base_context(); ctx.update(robots='noindex,nofollow',metaTitle='Admin Dashboard | Kenya Schools',schools=schools,properties=props,errors=errors,enquiries=enquiries,portalEnquiries=portals,contactMessages=messages,stats=stats,settings=settings,visitorPaths=visitor_paths,visitorDays=visitor_days,payments=payments,accounts=accounts); return render_template('admin-dashboard.html',**ctx)
 def admin_action(sql,args,action,typ,rid,detail=''):
  r=admin_guard()
  if r:return r
  with conn() as c:c.execute(sql,args)
  audit(action,typ,rid,detail); return redirect('/admin')
+@app.post('/admin/schools/<int:rid>/edit')
+def school_edit(rid):
+ r=admin_guard()
+ if r:return r
+ name=safe(request.form.get('name'),180)
+ if not name:return error_page('Institution name required','Enter an institution name before saving.')
+ fields={
+  'name':name,'category':safe(request.form.get('category'),30) or 'school',
+  'ownership':safe(request.form.get('ownership'),40),'levels':safe(request.form.get('levels'),250),
+  'county':safe(request.form.get('county'),80),'town':safe(request.form.get('town'),100),
+  'accommodation':safe(request.form.get('accommodation'),60),'gender':safe(request.form.get('gender'),40),
+  'curriculum':safe(request.form.get('curriculum'),150),'fees_range':safe(request.form.get('fees_range'),120),
+  'address':safe(request.form.get('address'),300),'phone':safe(request.form.get('phone'),60),
+  'email':safe(request.form.get('email'),160),'website':safe_url(request.form.get('website')),
+  'description':safe(request.form.get('description'),3000),'video_url':safe_url(request.form.get('video_url'))
+ }
+ media_updates={}
+ for field,column in (('cover_photo','cover_path'),('logo_photo','logo_path')):
+  uploaded=request.files.get(field)
+  if uploaded and uploaded.filename:
+   ext=Path(secure_filename(uploaded.filename)).suffix.lower()
+   allowed={'image/jpeg':('.jpg','.jpeg'),'image/png':('.png',),'image/webp':('.webp',)}
+   if uploaded.mimetype not in allowed or ext not in allowed[uploaded.mimetype]:
+    return error_page('Unsupported image','Upload JPG, PNG or WebP images only.')
+   uploaded.seek(0,2); size=uploaded.tell(); uploaded.seek(0)
+   if size>8*1024*1024:return error_page('Image too large','Each image must be 8MB or smaller.')
+   filename=f"{int(time.time()*1000)}-{secrets.token_hex(5)}{ext}"
+   uploaded.save(UPLOAD/filename); media_updates[column]='/uploads/'+filename
+ with conn() as c:
+  current=c.execute('SELECT photos_json,logo_path,cover_path FROM schools WHERE id=?',(rid,)).fetchone()
+  if not current:return error_page('Institution not found','This institution record no longer exists.',404)
+  try:photos=json.loads(current['photos_json'] or '[]')
+  except Exception:photos=[]
+  if media_updates.get('cover_path') and media_updates['cover_path'] not in photos:photos.insert(0,media_updates['cover_path'])
+  c.execute('UPDATE schools SET name=:name,category=:category,ownership=:ownership,levels=:levels,county=:county,town=:town,accommodation=:accommodation,gender=:gender,curriculum=:curriculum,fees_range=:fees_range,address=:address,phone=:phone,email=:email,website=:website,description=:description,video_url=:video_url,logo_path=:logo_path,cover_path=:cover_path,photos_json=:photos_json,updated_at=:updated_at WHERE id=:id',
+   {**fields,'logo_path':media_updates.get('logo_path') or current['logo_path'],'cover_path':media_updates.get('cover_path') or current['cover_path'],'photos_json':json.dumps(photos),'updated_at':now(),'id':rid})
+ audit('institution_profile_edited','school',rid,name)
+ return redirect('/admin#institutions')
+
 @app.post('/admin/schools/<int:rid>/approve')
 def school_approve(rid):
  t=now(); exp=(datetime.now(timezone.utc)+timedelta(days=30)).isoformat(); return admin_action("UPDATE schools SET status='published',posted_at=?,expires_at=?,last_renewed_at=?,updated_at=? WHERE id=?",(t,exp,t,t,rid),'school_approved','school',rid,'Published for 30 days')
@@ -640,6 +800,93 @@ def backup_download():
  try:
   dest=create_backup(); audit('database_backup_created','database',None,dest.name); return send_file(dest,as_attachment=True)
  except Exception as e:log_error(e,'/admin/backup'); return error_page('Backup failed','The database backup could not be created. The error has been recorded in the admin error log.',500)
+@app.post('/admin/settings')
+def admin_settings_save():
+ r=admin_guard()
+ if r:return r
+ allowed=('business_name','contact_email','contact_phone','whatsapp','mpesa_paybill','mpesa_till','mpesa_account','payment_instructions','public_address')
+ with conn() as c:
+  for key in allowed:
+   c.execute('INSERT INTO site_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,safe(request.form.get(key),1500)))
+ audit('site_settings_updated','settings',None,'Public contact and payment details updated')
+ return redirect('/admin#settings')
+
+@app.post('/admin/backup/json')
+def backup_json_download():
+ r=admin_guard()
+ if r:return r
+ try:
+  from base64 import b64encode
+  db=BACKUP/f'export-{secrets.token_hex(5)}.sqlite'
+  with conn() as c:
+   target=sqlite3.connect(db); c.backup(target); target.close()
+  payload={'format':'kenya-schools-backup','version':1,'created_at':now(),'database_base64':b64encode(db.read_bytes()).decode(),'uploads':{}}
+  included=0
+  for f in UPLOAD.iterdir():
+   if f.is_file() and f.stat().st_size<12*1024*1024 and included+f.stat().st_size<=40*1024*1024:
+    payload['uploads'][f.name]=b64encode(f.read_bytes()).decode()
+    included+=f.stat().st_size
+  payload['uploads_note']='Media files over 12MB each or beyond the 40MB total export allowance are omitted.'
+  db.unlink(missing_ok=True)
+  data=json.dumps(payload,ensure_ascii=False).encode()
+  audit('json_backup_created','database',None,'Database and uploaded media exported')
+  return send_file(BytesIO(data),mimetype='application/json',as_attachment=True,download_name='kenya-schools-full-backup.json')
+ except Exception as e:
+  log_error(e,'/admin/backup/json'); return error_page('Backup failed','The JSON backup could not be created.',500)
+
+@app.post('/admin/restore')
+def admin_restore():
+ r=admin_guard()
+ if r:return r
+ uploaded_file=request.files.get('backup_file')
+ if not uploaded_file or not uploaded_file.filename:return error_page('Choose a backup','Select a SQLite or JSON backup file first.')
+ tmp=DATA/f'restore-{secrets.token_hex(6)}.sqlite'
+ try:
+  raw=uploaded_file.read()
+  if uploaded_file.filename.lower().endswith('.json'):
+   from base64 import b64decode
+   payload=json.loads(raw.decode('utf-8'))
+   if payload.get('format')!='kenya-schools-backup' or payload.get('version')!=1:raise ValueError('Unrecognised backup format')
+   tmp.write_bytes(b64decode(payload['database_base64'],validate=True))
+   media=payload.get('uploads',{})
+  else:
+   tmp.write_bytes(raw); media={}
+  test=sqlite3.connect(tmp)
+  result=test.execute('PRAGMA integrity_check').fetchone()[0]
+  required={r[0] for r in test.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+  test.close()
+  if result!='ok' or not {'schools','properties','enquiries'}.issubset(required):raise ValueError('Backup is not a valid Kenya Schools database')
+  # Preserve a rollback copy before replacing the active database.
+  rollback=create_backup()
+  os.replace(tmp,DB)
+  # Bring older valid backups forward to the current schema without discarding records.
+  with conn() as c:
+   c.executescript(SCHEMA)
+   for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'"),('schools','owner_account_id',"INTEGER"),('properties','owner_account_id',"INTEGER")]:
+    cols=[r['name'] for r in c.execute(f'PRAGMA table_info({table})')]
+    if col not in cols:c.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
+  for name,encoded in media.items():
+   safe_name=secure_filename(name)
+   if safe_name and len(safe_name)<180:
+    content=b64decode(encoded,validate=True)
+    if len(content)<=12*1024*1024:(UPLOAD/safe_name).write_bytes(content)
+  audit('database_restored','database',None,f'Restored from {uploaded_file.filename}; pre-restore copy {rollback.name}')
+  return redirect('/admin?restored=1')
+ except Exception as e:
+  tmp.unlink(missing_ok=True); log_error(e,'/admin/restore')
+  return error_page('Restore not completed','The backup was rejected or could not be restored. Your existing database has been kept.',400)
+
+@app.post('/admin/payments/<int:rid>/update')
+def admin_payment_update(rid):
+ r=admin_guard()
+ if r:return r
+ status=safe(request.form.get('status'),30)
+ if status not in ('awaiting_quote','awaiting_payment','paid','rejected','refunded','awaiting_review'):return error_page('Invalid payment status','Choose a valid payment status.')
+ amount=safe(request.form.get('amount'),80); reference=safe(request.form.get('reference'),120); notes=safe(request.form.get('notes'),500)
+ with conn() as c:c.execute('UPDATE payment_records SET status=?,amount=?,reference=?,notes=? WHERE id=?',(status,amount,reference,notes,rid))
+ audit('payment_record_updated','payment',rid,status)
+ return redirect('/admin#payments')
+
 @app.post('/admin/errors/clear')
 def clear_errors():return admin_action('DELETE FROM admin_errors',(),'admin_error_log_cleared','admin',None)
 @app.get('/sitemap.xml')
@@ -647,7 +894,7 @@ def sitemap():
  with conn() as c:
   rows=c.execute("SELECT slug,updated_at FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?)",(now(),)).fetchall()
   counties=[r[0] for r in c.execute("SELECT county FROM schools WHERE status='published' AND county<>'' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) GROUP BY county HAVING COUNT(*)>=3 ORDER BY county",(now(),)).fetchall()]
- fixed=['/','/schools','/directory/school','/directory/college','/directory/university','/advertise','/school-portal','/campus-living','/about','/privacy']+[f'/schools-in-{slugify(x)}' for x in counties]
+ fixed=['/','/schools','/directory/school','/directory/college','/directory/university','/advertise','/school-portal','/campus-living','/about','/privacy','/contact']+[f'/schools-in-{slugify(x)}' for x in counties]
  origin=current_site(); urls=''.join(f'<url><loc>{origin}{u}</loc></url>' for u in fixed)+''.join(f'<url><loc>{origin}/school/{r["slug"]}</loc><lastmod>{r["updated_at"][:10]}</lastmod></url>' for r in rows)
  return app.response_class('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls+'</urlset>',mimetype='application/xml')
 @app.get('/robots.txt')

@@ -34,7 +34,6 @@ h3 { font-size: 1.2rem; margin: 0 0 9px; font-weight: 800; }
 p { margin: 0 0 16px; }
 .eyebrow { color: var(--blue); font-weight: 800; font-size: .67rem; letter-spacing: .16em; line-height: 1.4; text-transform: uppercase; margin-bottom: 13px; }
 .eyebrow.light { color: rgba(255,255,255,.77); }
-.eyebrow-dot { display: inline-block; width: 7px; height: 7px; background: #e8bd68; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
 .muted, .admin-muted { color: var(--muted); }
 .button { border: 1px solid transparent; padding: 13px 19px; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: 12px; border-radius: 9px; font-weight: 700; font-size: .88rem; cursor: pointer; transition: transform .18s ease, background .18s ease, border-color .18s ease; }
 .button:hover { transform: translateY(-2px); }
@@ -48,8 +47,6 @@ p { margin: 0 0 16px; }
 .button-outline:hover { border-color: var(--blue); }
 .full-width { width: 100%; }
 .text-link { color: var(--blue); font-weight: 800; font-size: .86rem; display: inline-flex; align-items: center; gap: 8px; }
-.text-link span { transition: transform .2s; }
-.text-link:hover span { transform: translateX(4px); }
 
 /* Navigation */
 .site-header { position: relative; z-index: 20; background: rgba(255,255,255,.97); border-bottom: 1px solid rgba(220,228,235,.7); }
@@ -67,7 +64,7 @@ p { margin: 0 0 16px; }
 .nav-toggle { display: none; border: 0; color: var(--navy); background: transparent; font-size: 1.45rem; padding: 6px; }
 
 /* Homepage hero */
-.hero-search { min-height: 590px; position: relative; overflow: hidden; display: flex; align-items: center; background: var(--navy) url('/images/school-hero.webp') center 45% / cover no-repeat; color: #fff; isolation: isolate; }
+.hero-search { min-height: 590px; position: relative; overflow: hidden; display: flex; align-items: center; background: var(--navy) url('https://upload.wikimedia.org/wikipedia/commons/thumb/f/f3/University_of_Nairobi_Entrance.jpg/1280px-University_of_Nairobi_Entrance.jpg') center 45% / cover no-repeat; color: #fff; isolation: isolate; }
 .hero-search::before { content: ""; position: absolute; inset: -6px; background: inherit; filter: blur(1.3px); transform: scale(1.015); z-index: -2; }
 .hero-scrim { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(12,34,55,.91) 0%, rgba(15,42,67,.79) 47%, rgba(15,42,67,.22) 100%), linear-gradient(0deg, rgba(13,36,57,.36), transparent 55%); z-index: -1; }
 .hero-content { position: relative; padding-top: 76px; padding-bottom: 83px; max-width: 1160px; }
@@ -77,7 +74,6 @@ p { margin: 0 0 16px; }
 .hero-search-form { width: min(930px, 100%); display: grid; grid-template-columns: 1.65fr .72fr auto; gap: 7px; border: 1px solid rgba(255,255,255,.48); background: rgba(255,255,255,.96); border-radius: 13px; padding: 7px; box-shadow: 0 16px 45px rgba(0,0,0,.22); }
 .search-field, .search-select { display: flex; align-items: center; min-width: 0; color: #80909e; padding: 0 12px; }
 .search-field { gap: 10px; border-right: 1px solid var(--line); }
-.search-field span { color: var(--blue); font-size: 1.65rem; line-height: 1; }
 .search-field input, .search-select select { width: 100%; border: 0; outline: 0; background: transparent; min-height: 48px; color: var(--ink); font-size: .91rem; }
 .search-select { flex-direction: column; align-items: flex-start; justify-content: center; gap: 0; }
 .search-select span { font-size: .62rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color: #85939e; }
@@ -88,6 +84,10 @@ p { margin: 0 0 16px; }
 .hero-shortcuts a:hover { color: #e8c77c; border-color: #e8c77c; }
 .hero-note { position: absolute; right: max(22px, calc((100% - 1160px)/2)); bottom: 27px; color: rgba(255,255,255,.7); font-size: .62rem; font-weight: 800; letter-spacing: .16em; }
 .hero-note span { color: #e8bf70; margin-right: 9px; }
+.hero-photo-credit { display:block; margin-top:5px; font-size:.56rem; letter-spacing:0; font-weight:500; text-transform:none; }
+.hero-photo-credit a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+.photo-credit-card { padding:0 14px 7px; margin-top:-3px; font-size:.6rem; }
+.school-card-image .school-photo-placeholder { position:absolute; inset:0; min-height:0; }
 
 /* Sections and categories */
 .category-section { padding-bottom: 55px; }
@@ -95,12 +95,11 @@ p { margin: 0 0 16px; }
 .section-heading p { color: var(--muted); margin: 0; }
 .section-heading .text-link { margin-bottom: 5px; }
 .category-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 13px; }
-.category-tile { display: flex; align-items: center; gap: 13px; min-height: 104px; padding: 18px 16px; border: 1px solid var(--line); border-radius: 13px; background: #fff; transition: transform .2s, box-shadow .2s, border-color .2s; }
-.category-tile:hover { transform: translateY(-4px); border-color: #c4d7e5; box-shadow: var(--shadow); }
-.category-icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; color: var(--blue); background: #edf5fa; font-size: 1.5rem; flex: 0 0 44px; }
-.category-tile strong { display: block; color: var(--navy); font: 800 .94rem Manrope, sans-serif; }
-.category-tile small { display: block; color: #7b8996; font-size: .7rem; margin-top: 4px; line-height: 1.35; }
-.category-tile b { color: #91a1af; margin-left: auto; align-self: flex-start; }
+.category-button { display:flex; flex-direction:column; justify-content:center; min-height:82px; padding:14px 18px; border:1px solid #17324d; border-radius:8px; background:#17324d; color:#fff; box-shadow:inset 0 -3px 0 #d2a13c; transition:background .18s ease,transform .18s ease; }
+.category-button:hover { background:#244d6d; transform:translateY(-2px); }
+.category-button:focus-visible { outline:3px solid #d2a13c; outline-offset:3px; }
+.category-button strong { display:block; color:#fff; font:800 .96rem Manrope,sans-serif; }
+.category-button small { display:block; color:rgba(255,255,255,.78); font-size:.7rem; margin-top:4px; line-height:1.35; }
 .featured-ribbon { background: var(--navy); color: #fff; padding: 36px 0 38px; }
 .ribbon-inner { display: grid; grid-template-columns: .8fr 1.4fr; align-items: center; gap: 35px; }
 .ribbon-inner h2 { font-size: 1.75rem; margin: 0; }
@@ -138,7 +137,8 @@ p { margin: 0 0 16px; }
 .partner-panel h2, .portal-panel h2 { font-size: clamp(1.8rem, 3vw, 2.45rem); }
 .partner-panel p, .portal-panel p { max-width: 380px; line-height: 1.65; font-size: .9rem; }
 .partner-panel p { color: rgba(255,255,255,.73); margin-bottom: 23px; }
-.partner-symbol { width: 43px; height: 43px; flex: 0 0 43px; display: grid; place-items: center; border-radius: 12px; background: rgba(255,255,255,.14); color: #e9c16f; font-size: 1.6rem; }
+.partner-symbol { width: 43px; height: 43px; flex: 0 0 43px; display: grid; place-items: center; border-radius: 8px; background: rgba(255,255,255,.14); overflow:hidden; }
+.partner-symbol img { width:34px; height:23px; object-fit:cover; }
 .portal-panel { background: #eff4f7; }
 .portal-panel p { color: #667683; margin-bottom: 18px; }
 .portal-art { position: absolute; right: -20px; bottom: -26px; width: 63%; height: 130px; opacity: .92; transform: rotate(-5deg); }
@@ -150,14 +150,13 @@ p { margin: 0 0 16px; }
 .living-section { display: grid; grid-template-columns: .8fr 1.2fr; gap: 60px; align-items: center; padding-top: 0; }
 .living-copy p { color: var(--muted); max-width: 365px; margin: 17px 0 23px; }
 .living-card { display: grid; grid-template-columns: 1.1fr .9fr; min-height: 275px; overflow: hidden; border: 1px solid var(--line); border-radius: 17px; background: #fff; box-shadow: var(--shadow); }
-.living-photo { background: url('/images/school-hero.webp') center/cover; min-height: 275px; }
+.living-photo { background: linear-gradient(145deg,#dce7ee,#b7c9d6 55%,#edf2f5); min-height: 275px; }
 .living-card-copy { padding: 27px 24px; align-self: center; }
 .living-card-copy h3 { font-size: 1.3rem; margin-top: 13px; }
 .living-card-copy p { color: var(--muted); font-size: .83rem; }
 .note-strip { display: flex; align-items: center; gap: 14px; padding: 17px 20px; border-radius: 10px; background: #f4f7f9; border: 1px solid #e8edf1; margin-bottom: 78px; }
 .note-strip p { margin: 0; color: #60707c; font-size: .78rem; flex: 1; }
 .note-strip a { color: var(--blue); font-weight: 800; font-size: .78rem; white-space: nowrap; }
-.note-mark { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 50%; background: #dfeaf2; color: var(--blue); font-weight: 800; flex: 0 0 25px; }
 .note-strip.compact { margin: 20px 0 0; align-items: flex-start; }
 
 /* Generic page hero and directory */
@@ -165,11 +164,11 @@ p { margin: 0 0 16px; }
 .page-hero .container { max-width: 1160px; }
 .page-hero h1 { font-size: clamp(2.6rem, 4.5vw, 4rem); max-width: 800px; }
 .page-hero p { color: #667785; max-width: 650px; font-size: 1.03rem; }
-.page-hero-business { background: linear-gradient(110deg,rgba(15,40,63,.95),rgba(23,50,77,.74)),url('/images/school-hero.webp') center 48%/cover; color: white; }
+.page-hero-business { background: linear-gradient(110deg,#10283f,#245270); color: white; }
 .page-hero-business p, .page-hero-portal p, .page-hero-living p { color: rgba(255,255,255,.78); }
 .page-hero-business .eyebrow, .page-hero-portal .eyebrow, .page-hero-living .eyebrow { color: #e6c274; }
-.page-hero-portal { background: linear-gradient(115deg,rgba(17,43,66,.97),rgba(25,65,96,.85)),url('/images/school-hero.webp') center/cover; color: #fff; }
-.page-hero-living { background: linear-gradient(115deg,rgba(17,43,66,.94),rgba(22,53,78,.7)),url('/images/school-hero.webp') center/cover; color: #fff; }
+.page-hero-portal { background: linear-gradient(115deg,#10283f,#245270); color: #fff; }
+.page-hero-living { background: linear-gradient(115deg,#10283f,#245270); color: #fff; }
 .directory-layout { display: grid; grid-template-columns: 255px 1fr; gap: 28px; align-items: start; padding-top: 43px; padding-bottom: 85px; }
 .filter-panel { border: 1px solid var(--line); border-radius: 14px; padding: 18px; position: sticky; top: 20px; background: #fff; }
 .filter-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; font-size: .87rem; }
@@ -371,17 +370,17 @@ textarea { resize: vertical; }
   .search-select select { min-height: 28px; }
   .hero-search-form .button { margin-top: 5px; }
   .hero-shortcuts { gap: 9px 12px; }
-  .hero-note { display: none; }
+  .hero-note { display:block; right:15px; bottom:10px; max-width:calc(100% - 30px); font-size:.54rem; letter-spacing:.1em; text-align:right; }
+  .hero-photo-credit { font-size:.52rem; }
   .section { padding-top: 54px; padding-bottom: 54px; }
   .section-heading { display: block; }
   .section-heading .text-link { margin-top: 13px; }
   .section-heading p { font-size: .84rem; }
   .category-grid { grid-template-columns: 1fr 1fr; gap: 9px; }
-  .category-tile { gap: 9px; min-height: 100px; padding: 13px 11px; }
-  .category-icon { width: 37px; height: 37px; flex-basis: 37px; font-size: 1.15rem; }
-  .category-tile strong { font-size: .78rem; }
-  .category-tile small { font-size: .62rem; }
-  .category-tile b { display: none; }
+  .category-button { min-height: 78px; padding: 12px 13px; }
+  .category-button strong { font-size: .82rem; }
+  .category-button small { font-size: .63rem; }
+
   .featured-ribbon { padding: 29px 0; }
   .ribbon-inner { grid-template-columns: 1fr; gap: 18px; }
   .ribbon-inner h2 { font-size: 1.5rem; }
@@ -442,7 +441,7 @@ textarea { resize: vertical; }
 }
 @media (max-width: 390px) {
   .category-grid { grid-template-columns: 1fr; }
-  .category-tile { min-height: 82px; }
+  .category-button { min-height: 76px; }
   .profile-aside { grid-template-columns: 1fr; }
   .contact-card { grid-row: auto; }
   .form-row { grid-template-columns: 1fr; }
@@ -474,3 +473,161 @@ textarea { resize: vertical; }
   .profile-photo-grid { grid-template-columns: 1fr; }
   .profile-photo-grid .profile-gallery-image { height: 210px; }
 }
+
+
+/* SCHOOLS Kenya identity and real-photo presentation */
+.kenya-flag { width:28px; height:19px; object-fit:cover; display:inline-block; border:1px solid rgba(20,40,58,.18); border-radius:2px; flex:0 0 auto; }
+.school-photo-placeholder { display:grid; place-items:center; width:100%; height:100%; min-height:155px; color:#fff; background:linear-gradient(140deg,#17324d,#335a75); font:800 2rem Manrope,sans-serif; letter-spacing:.04em; }
+.profile-hero { position:relative; }
+.photo-credit { color:#71808d; font-size:.67rem; line-height:1.45; margin-top:7px; }
+.photo-credit a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+.photo-credit-hero { max-width:680px; margin-top:16px; color:rgba(255,255,255,.82); }
+.profile-photo-grid { align-items:start; }
+.profile-photo-item { min-width:0; margin:0; }
+.profile-photo-item a { display:block; overflow:hidden; border-radius:10px; background:#e8edf1; }
+.profile-photo-item .profile-gallery-image { width:100%; height:190px; object-fit:cover; }
+.category-grid { align-items:stretch; }
+@media (max-width:720px) { .kenya-flag { width:25px; height:17px; } }
+
+
+/* SCHOOLS discovery refresh: photographed profiles first, factual name/location rows second. */
+.category-button {
+  min-height: 72px;
+  padding: 13px 17px;
+  border: 1px solid #17324d;
+  border-radius: 5px;
+  background: #17324d;
+  color: #fff;
+  box-shadow: none;
+  transition: background .16s ease, border-color .16s ease;
+}
+.category-button:hover { background: #244d6d; border-color: #244d6d; transform: none; }
+.category-button strong { font-size: .94rem; letter-spacing: -.01em; }
+.category-button small { color: rgba(255,255,255,.84); font-size: .69rem; }
+.photo-first-section { padding-top: 48px; }
+.photo-first-grid { grid-template-columns: repeat(3, minmax(0,1fr)); gap: 20px; }
+.photo-first-grid .school-card { border-radius: 8px; box-shadow: 0 3px 14px rgba(19,43,66,.055); }
+.photo-first-grid .school-card-image { height: 205px; background: #e9eef2; }
+.photo-first-grid .school-card-body { padding: 15px 16px 17px; }
+.school-card { border-radius: 9px; }
+.school-card:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(19,43,66,.09); }
+.school-card-image { background: #e9eef2; }
+.school-photo-placeholder { display: none !important; }
+.school-card-text-only { display: flex; min-height: 0; border-radius: 7px; box-shadow: none; }
+.school-card-text-only:hover { transform: none; box-shadow: 0 5px 16px rgba(19,43,66,.06); }
+.school-card-text-only .school-card-body { width: 100%; padding: 14px 16px; }
+.school-card-text-only .badge-row { margin-bottom: 5px; }
+.school-card-text-only h3 { font-size: .95rem; margin-bottom: 3px; }
+.school-card-text-only .school-location { margin-bottom: 9px; }
+.school-card-text-only .school-description,
+.school-card-text-only .school-meta { display: none; }
+.card-action { min-height: 34px; padding: 7px 12px; font-size: .72rem; }
+.text-directory-section { padding-top: 35px; }
+.home-directory-list { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 28px; border-top: 1px solid #e6ebef; }
+.home-directory-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-width: 0; padding: 13px 0; border-bottom: 1px solid #e6ebef; }
+.home-directory-copy { min-width: 0; }
+.home-directory-copy h3 { margin: 0 0 3px; font: 750 .88rem Manrope,sans-serif; color: #17324d; line-height: 1.3; }
+.home-directory-copy h3 a:hover { color: #2269a5; }
+.home-directory-copy p { margin: 0; color: #71808d; font-size: .7rem; line-height: 1.4; }
+.home-directory-action { flex: 0 0 auto; min-height: 32px; padding: 6px 10px; font-size: .66rem; }
+.directory-grid { align-items: start; }
+.directory-grid .school-card-text-only { grid-column: span 1; }
+@media (max-width: 980px) {
+  .photo-first-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 720px) {
+  .photo-first-section { padding-top: 37px; }
+  .photo-first-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .photo-first-grid .school-card-image { height: 135px; }
+  .photo-first-grid .school-card-body { padding: 11px 11px 13px; }
+  .photo-first-grid .school-card h3 { font-size: .88rem; }
+  .photo-first-grid .school-location { font-size: .68rem; }
+  .photo-first-grid .school-description { display: none; }
+  .photo-first-grid .school-meta { display: none; }
+  .home-directory-list { grid-template-columns: 1fr; }
+  .home-directory-row { padding: 12px 0; }
+  .home-directory-copy h3 { font-size: .84rem; }
+  .home-directory-action { font-size: .62rem; }
+}
+@media (max-width: 390px) {
+  .photo-first-grid { grid-template-columns: 1fr; }
+  .photo-first-grid .school-card-image { height: 185px; }
+  .category-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* In the full directory, photo-less institutions become clean full-width name/location rows. */
+.directory-grid .school-card-text-only {
+  grid-column: 1 / -1;
+  border: 0;
+  border-bottom: 1px solid #e6ebef;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.directory-grid .school-card-text-only:hover {
+  transform: none;
+  box-shadow: none;
+  background: #fafcfd;
+}
+.directory-grid .school-card-text-only .school-card-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 13px 9px;
+}
+.directory-grid .school-card-text-only .badge-row {
+  flex: 0 0 100%;
+  margin: 0;
+}
+.directory-grid .school-card-text-only h3 {
+  flex: 1 1 220px;
+  margin: 0;
+}
+.directory-grid .school-card-text-only .school-location {
+  flex: 1 1 160px;
+  margin: 0;
+}
+.directory-grid .school-card-text-only .card-action {
+  margin-left: auto;
+}
+
+/* Kenya Schools administration workspace refresh */
+.admin-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:26px;max-width:1500px;margin:0 auto;padding:24px 28px 60px}
+.admin-sidebar{position:sticky;top:18px;align-self:start;display:flex;flex-direction:column;gap:5px;padding:16px 12px;border:1px solid #e4e9ee;border-radius:14px;background:#fff}
+.admin-side-label{font-size:10px;letter-spacing:.16em;font-weight:800;color:#8793a0;padding:8px 10px}
+.admin-sidebar a{padding:11px 12px;border-radius:8px;text-decoration:none;color:#34475a;font-weight:650;font-size:13px}
+.admin-sidebar a:hover{background:#f0f4f7;color:#17324d}
+.admin-content{min-width:0;max-width:none;padding:0}
+.admin-welcome-actions,.backup-actions{display:flex;gap:10px;flex-wrap:wrap}
+.admin-stats{grid-template-columns:repeat(auto-fit,minmax(145px,1fr))}
+.admin-stats.compact{margin:12px 0 24px}
+.admin-management{margin-top:12px;border:1px solid #e7ebef;border-radius:10px;overflow:hidden}
+.admin-management>summary{cursor:pointer;list-style:none;padding:15px 18px;font-weight:750;display:flex;justify-content:space-between;gap:12px;background:#f7f9fb}
+.admin-management>summary::-webkit-details-marker{display:none}
+.admin-management>summary span{font-size:12px;color:#738191;font-weight:500}
+.admin-management .admin-legend{padding:0 18px}
+.admin-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.admin-settings-grid label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700;color:#526171}
+.admin-settings-grid input,.admin-settings-grid textarea{width:100%;padding:11px 12px;border:1px solid #d9e0e6;border-radius:8px;background:#fff;color:#203449;font:inherit;font-weight:450}
+.admin-settings-grid .wide{grid-column:1/-1}
+.restore-panel{margin-top:18px;padding:18px;border:1px solid #e3e8ed;border-radius:10px;background:#f8fafb}
+.restore-panel form{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.restore-panel p,.admin-muted{color:#748292}
+.admin-footer{padding:25px 0;color:#8a96a2;font-size:12px}
+@media(max-width:900px){.admin-layout{grid-template-columns:1fr;padding:12px}.admin-sidebar{position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.admin-side-label{grid-column:1/-1}.admin-settings-grid{grid-template-columns:1fr}}
+@media(max-width:520px){.admin-sidebar{grid-template-columns:1fr 1fr}.admin-welcome-actions,.backup-actions{display:grid;grid-template-columns:1fr}.restore-panel form{align-items:stretch;flex-direction:column}.admin-topbar{gap:10px}.admin-topbar .brand-copy small{display:none}}
+
+.profile-edit{position:relative}
+.profile-edit>summary{cursor:pointer;list-style:none}
+.profile-edit>summary::-webkit-details-marker{display:none}
+.profile-edit-form{position:absolute;z-index:30;right:0;top:28px;width:min(560px,85vw);max-height:70vh;overflow:auto;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:16px;background:#fff;border:1px solid #dce3e9;border-radius:12px;box-shadow:0 18px 45px rgba(15,35,55,.18)}
+.profile-edit-form label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:#607080}
+.profile-edit-form input,.profile-edit-form select,.profile-edit-form textarea{width:100%;min-width:0;padding:8px;border:1px solid #dce3e9;border-radius:6px;font:inherit;color:#23384b}
+.profile-edit-form .wide{grid-column:1/-1}
+@media(max-width:560px){.profile-edit-form{position:fixed;left:5vw;right:5vw;top:12vh;width:90vw;max-height:76vh;grid-template-columns:1fr}}
+
+.institution-logo{width:88px;height:88px;object-fit:contain;background:#fff;border-radius:14px;padding:8px;margin:0 0 14px;box-shadow:0 8px 25px rgba(0,0,0,.16)}
+
+.brand-avatar{width:42px;height:42px;object-fit:cover;border-radius:11px;flex:0 0 auto;border:1px solid rgba(20,55,40,.12)}
+.admin-topbar .brand-avatar{width:40px;height:40px}

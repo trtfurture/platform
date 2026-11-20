@@ -1,7 +1,7 @@
 {
-  "name": "SCHOOLS Kenya",
-  "short_name": "SCHOOLS",
-  "description": "Discover schools, colleges and universities across Kenya.",
+  "name": "Kenya Schools",
+  "short_name": "Kenya Schools",
+  "description": "Explore schools, colleges, universities and campus living across Kenya.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",

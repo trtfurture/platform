@@ -21,7 +21,7 @@
 
   {% if photo_featured|length %}
   <section class="container section photo-first-section">
-    <div class="section-heading"><div><div class="eyebrow">REAL CAMPUS PHOTOGRAPHS</div><h2>Take a look around.</h2><p>Explore institutions with genuine photographs. More listings appear below by name and location until their own photographs are added.</p></div><a href="/schools" class="text-link">Browse all institutions</a></div>
+    <div class="section-heading"><div><div class="eyebrow">REAL CAMPUS PHOTOGRAPHS</div><h2>Take a look around.</h2><p>Browse institution profiles, campus photographs, locations and contact information from across Kenya.</p></div><a href="/schools" class="text-link">Browse all institutions</a></div>
     <div class="school-grid photo-first-grid">{% for school in photo_featured %}{% include 'partials/school-card.html' %}{% endfor %}</div>
   </section>
   {% endif %}
@@ -42,7 +42,7 @@
 
   {% if text_featured|length %}
   <section class="container section text-directory-section">
-    <div class="section-heading"><div><div class="eyebrow">MORE IN THE DIRECTORY</div><h2>Schools and institutions by name.</h2><p>These profiles currently show their name and recorded location. Institutions can add their own photographs when they claim or update a listing.</p></div><a href="/schools" class="text-link">Open full directory</a></div>
+    <div class="section-heading"><div><div class="eyebrow">MORE IN THE DIRECTORY</div><h2>Schools and institutions by name.</h2><p>Explore schools and institutions by name, education level and location.</p></div><a href="/schools" class="text-link">Open full directory</a></div>
     <div class="home-directory-list">
       {% for school in text_featured %}
       <article class="home-directory-row">
@@ -55,7 +55,7 @@
   {% endif %}
 
   <section class="container partner-section">
-    <div class="partner-panel"><div class="partner-symbol"><img src="/images/kenya-flag.svg" alt="Kenya" width="34" height="23"></div><div><div class="eyebrow light">FOR SCHOOLS & INSTITUTIONS</div><h2>Make your campus<br>easy to discover.</h2><p>Showcase your facilities, admissions information, photos and videos to people actively exploring education options.</p><a class="button button-light" href="/advertise">Advertise your institution</a></div></div>
+    <div class="partner-panel"><div class="partner-symbol"><img src="/images/kenya-flag.svg" alt="Kenya" width="34" height="23"></div><div><div class="eyebrow light">FOR Kenya Schools & INSTITUTIONS</div><h2>Make your campus<br>easy to discover.</h2><p>Showcase your facilities, admissions information, photos and videos to people actively exploring education options.</p><a class="button button-light" href="/advertise">Advertise your institution</a></div></div>
     <div class="portal-panel"><div class="eyebrow">YOUR DIGITAL FRONT DOOR</div><h2>Give your institution<br>a website of its own.</h2><p>Get a modern school website with a simple dashboard to manage news, admissions and campus information.</p><a class="button button-outline" href="/school-portal">Explore school portals</a><div class="portal-art"><div class="portal-window"><div class="portal-lines"></div><div class="portal-blocks"></div></div></div></div>
   </section>
 
@@ -63,6 +63,5 @@
     <div class="living-copy"><div class="eyebrow">BEYOND THE CLASSROOM</div><h2>Find your place<br>around campus.</h2><p>Explore student accommodation, hostels and nearby services as the campus marketplace grows.</p><a class="button button-dark" href="/campus-living">Explore campus living</a></div>
     <div class="living-card"><div class="living-photo"></div><div class="living-card-copy"><span class="promo-badge vip">CAMPUS LIVING</span><h3>Student stays & rentals</h3><p>Discover places to stay near colleges and universities.</p><a href="/campus-living" class="button button-outline">Explore listings</a></div></div>
   </section>
-  <section class="container note-strip"><p><strong>Our promise:</strong> Listings are reviewed, promotion is labelled clearly, and institution information should be confirmed directly before making important decisions.</p><a href="/about">How it works</a></section>
 </main>
 {% include 'partials/footer.html' %}

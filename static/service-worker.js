@@ -1,5 +1,5 @@
-const CACHE_NAME = 'schools-shell-v3';
-const SHELL = ['/', '/css/site.css', '/js/app.js', '/manifest.webmanifest', '/images/schools-mark.svg', '/images/kenya-flag.svg', '/offline.html'];
+const CACHE_NAME = 'schools-shell-20261120-admin-refresh';
+const SHELL = ['/', '/css/site.css', '/js/app.js', '/manifest.webmanifest', '/images/schools-mark.svg', '/images/kenya-schools-profile.jpg', '/images/kenya-flag.svg', '/offline.html'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });

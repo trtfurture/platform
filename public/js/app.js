@@ -5,7 +5,7 @@
     toggle.addEventListener('click', () => {
       const open = nav.classList.toggle('is-open');
       toggle.setAttribute('aria-expanded', String(open));
-      toggle.textContent = open ? '×' : '☰';
+      toggle.textContent = open ? 'Close' : 'Menu';
     });
   }
   if ('serviceWorker' in navigator) {
