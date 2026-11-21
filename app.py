@@ -12,10 +12,22 @@ from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 import bcrypt, qrcode
 from io import BytesIO
+from hashlib import sha256
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 BASE=Path(__file__).resolve().parent
 load_dotenv(BASE/'.env')
 PROD=os.environ.get('RENDER')=='true' or bool(os.environ.get('RENDER_EXTERNAL_URL')) or os.environ.get('FLASK_ENV')=='production'
+# Public launch tariff (KES). Keep this table as the single source of truth for
+# the advertiser form, referral conversions, payment validation and admin views.
+PROMOTION_PRICES = {
+ 'vip': {30: 3000, 60: 5500, 90: 7500},
+ 'vvip': {30: 6000, 60: 11000, 90: 15000},
+}
+PROMOTION_DURATIONS = (30, 60, 90)
+def promotion_price(tier, duration_days):
+ try: return PROMOTION_PRICES[tier][int(duration_days)]
+ except (KeyError, TypeError, ValueError): return None
 
 # Prefer Render's persistent disk when it is actually mounted and writable.
 # Free Render instances do not have persistent disks; in that case use a
@@ -79,6 +91,7 @@ def current_site():
  return request.host_url.rstrip('/') if has_request_context() else SITE
 app.wsgi_app=ProxyFix(app.wsgi_app,x_for=1,x_proto=1,x_host=1)
 app.secret_key=load_persistent_session_key(DATA)
+referral_serializer=URLSafeTimedSerializer(app.secret_key,salt='kenya-schools-referral-v1')
 app.config.update(SESSION_TYPE='filesystem',SESSION_FILE_DIR=str(DATA/'flask_sessions'),SESSION_PERMANENT=True,PERMANENT_SESSION_LIFETIME=timedelta(hours=8),SESSION_COOKIE_NAME='schools.admin',SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Lax',SESSION_COOKIE_SECURE=PROD,SESSION_USE_SIGNER=True,MAX_CONTENT_LENGTH=50*1024*1024)
 Path(app.config['SESSION_FILE_DIR']).mkdir(parents=True,exist_ok=True)
 Session(app)
@@ -218,9 +231,11 @@ SCHEMA=r'''
     account_id INTEGER,
     purpose TEXT NOT NULL,
     tier TEXT DEFAULT '',
+    duration_days INTEGER NOT NULL DEFAULT 30,
     amount TEXT DEFAULT '',
     reference TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',
+    paid_at TEXT DEFAULT '',
     notes TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     FOREIGN KEY(account_id) REFERENCES customer_accounts(id)
@@ -248,15 +263,62 @@ SCHEMA=r'''
     moderated_at TEXT DEFAULT '',
     FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
   );
+  CREATE TABLE IF NOT EXISTS referral_partners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    phone TEXT NOT NULL UNIQUE,
+    email TEXT DEFAULT '',
+    code TEXT NOT NULL UNIQUE,
+    dashboard_token_hash TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused')),
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS school_referrals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referrer_id INTEGER NOT NULL,
+    school_id INTEGER NOT NULL UNIQUE,
+    account_id INTEGER UNIQUE,
+    referral_code TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'registered' CHECK(status IN ('registered','converted','disqualified')),
+    created_at TEXT NOT NULL,
+    converted_at TEXT DEFAULT '',
+    FOREIGN KEY(referrer_id) REFERENCES referral_partners(id),
+    FOREIGN KEY(school_id) REFERENCES schools(id) ON DELETE CASCADE,
+    FOREIGN KEY(account_id) REFERENCES customer_accounts(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS referral_rewards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    referral_id INTEGER NOT NULL UNIQUE,
+    payment_record_id INTEGER NOT NULL UNIQUE,
+    amount_kes INTEGER NOT NULL DEFAULT 1000 CHECK(amount_kes=1000),
+    status TEXT NOT NULL DEFAULT 'pending_clearance' CHECK(status IN ('pending_clearance','payable','paid','void','reversal_review')),
+    earned_at TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    paid_at TEXT DEFAULT '',
+    payout_reference TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    FOREIGN KEY(referral_id) REFERENCES school_referrals(id),
+    FOREIGN KEY(payment_record_id) REFERENCES payment_records(id)
+  );
 '''
 with conn() as c:
  c.execute('PRAGMA journal_mode=WAL')
  c.executescript(SCHEMA)
- for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'"),('schools','owner_account_id',"INTEGER"),('properties','owner_account_id',"INTEGER")]:
+ for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'"),('schools','requested_duration_days','INTEGER NOT NULL DEFAULT 30'),('schools','owner_account_id',"INTEGER"),('properties','owner_account_id',"INTEGER"),('payment_records','school_id',"INTEGER"),('payment_records','referral_id',"INTEGER"),('payment_records','duration_days','INTEGER NOT NULL DEFAULT 30'),('payment_records','paid_at',"TEXT DEFAULT ''")]:
   cols=[r['name'] for r in c.execute(f'PRAGMA table_info({table})')]
   if col not in cols: c.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
+ c.execute("""UPDATE payment_records
+  SET amount=CASE tier
+    WHEN 'vip' THEN CASE duration_days WHEN 30 THEN '3000' WHEN 60 THEN '5500' WHEN 90 THEN '7500' END
+    WHEN 'vvip' THEN CASE duration_days WHEN 30 THEN '6000' WHEN 60 THEN '11000' WHEN 90 THEN '15000' END
+    ELSE amount END,
+   status='awaiting_payment',
+   notes=COALESCE(notes,'') || ' Updated to the published fixed advertising tariff.'
+  WHERE purpose='Institution promotion' AND tier IN ('vip','vvip') AND status='awaiting_quote' AND (amount IS NULL OR TRIM(amount)='')""")
  c.execute("DELETE FROM admin_errors WHERE route='/pulse_receiver' AND message LIKE '%405 Method Not Allowed%'")
- c.executescript("CREATE INDEX IF NOT EXISTS idx_visitors_created ON visitor_events(created_at); CREATE INDEX IF NOT EXISTS idx_visitors_path ON visitor_events(path); CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at); CREATE INDEX IF NOT EXISTS idx_reviews_school_status ON institution_reviews(school_id,status,created_at);")
+ c.executescript("CREATE INDEX IF NOT EXISTS idx_visitors_created ON visitor_events(created_at); CREATE INDEX IF NOT EXISTS idx_visitors_path ON visitor_events(path); CREATE INDEX IF NOT EXISTS idx_schools_status_category ON schools(status, category); CREATE INDEX IF NOT EXISTS idx_schools_county ON schools(county); CREATE INDEX IF NOT EXISTS idx_schools_promotions ON schools(promotion_tier, promotion_expires_at); CREATE INDEX IF NOT EXISTS idx_reviews_school_status ON institution_reviews(school_id,status,created_at); CREATE INDEX IF NOT EXISTS idx_referral_code ON referral_partners(code); CREATE INDEX IF NOT EXISTS idx_school_referrals_referrer ON school_referrals(referrer_id,status); CREATE INDEX IF NOT EXISTS idx_referral_rewards_status ON referral_rewards(status,available_at);")
 
 def now(): return datetime.now(timezone.utc).isoformat()
 def safe(v,n=5000): return str(v or '').strip()[:n]
@@ -279,6 +341,27 @@ def get_or_create_customer(name,phone,email=''):
    return row['id']
   cur=c.execute('INSERT INTO customer_accounts(full_name,email,phone,created_at) VALUES(?,?,?,?)',(name,email,phone,now()))
   return cur.lastrowid
+
+def normalise_contact(value):
+ digits=re.sub(r'\D','',str(value or ''))
+ if len(digits)==12 and digits.startswith('254'):return digits[-9:]
+ if len(digits)==10 and digits.startswith('0'):return digits[-9:]
+ return digits
+
+def current_referral_partner():
+ raw=request.cookies.get('schools_referral','')
+ if not raw:return None
+ try: code=referral_serializer.loads(raw,max_age=30*24*60*60)
+ except (BadSignature,SignatureExpired,ValueError,TypeError):return None
+ with conn() as c:
+  row=c.execute("SELECT id,full_name,phone,email,code,status FROM referral_partners WHERE code=? AND status='active'",(code,)).fetchone()
+ return dict(row) if row else None
+
+def referral_reward_summary(partner_id):
+ with conn() as c:
+  row=c.execute("SELECT COUNT(*) AS referrals, SUM(CASE WHEN status='converted' THEN 1 ELSE 0 END) AS converted FROM school_referrals WHERE referrer_id=?",(partner_id,)).fetchone()
+  rewards=c.execute("SELECT COALESCE(SUM(amount_kes),0) AS total, COALESCE(SUM(CASE WHEN status IN ('pending_clearance','payable') THEN amount_kes ELSE 0 END),0) AS outstanding, COALESCE(SUM(CASE WHEN status='paid' THEN amount_kes ELSE 0 END),0) AS paid FROM referral_rewards r JOIN school_referrals sr ON sr.id=r.referral_id WHERE sr.referrer_id=?",(partner_id,)).fetchone()
+ return {'referrals':row['referrals'] or 0,'converted':row['converted'] or 0,'total':rewards['total'] or 0,'outstanding':rewards['outstanding'] or 0,'paid':rewards['paid'] or 0}
 
 def audit(action,typ='',rid=None,detail=''):
  with conn() as c:c.execute('INSERT INTO audit_events(action,record_type,record_id,detail,created_at) VALUES(?,?,?,?,?)',(action,typ,rid,safe(detail,1000),now()))
@@ -468,7 +551,7 @@ def base_context():
  site=current_site(); qrurl=site+'/?source=toror-signature-qr'
  qr=qrcode.QRCode(box_size=3,border=1); qr.add_data(qrurl); qr.make(fit=True); im=qr.make_image(fill_color='#17324d',back_color='white'); bio=BytesIO(); im.save(bio,format='PNG')
  from base64 import b64encode
- return dict(publicSettings=public_settings,siteName='Kenya Schools',siteUrl=site,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Kenya Schools | Find Schools, Colleges & Universities',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=site+('/' if path=='/' else path),pageImage=site+'/images/kenya-schools-profile.jpg',heroCredit=photo_attribution(HERO_PHOTO['url']),isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'Kenya Schools','url':site,'description':'Find and compare schools, colleges and universities across Kenya.','publisher':{'@type':'Organization','name':'Toror Technology and Innovations Limited','url':site,'logo':site+'/images/kenya-schools-profile.jpg'},'potentialAction':{'@type':'SearchAction','target':site+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
+ return dict(current_year=datetime.now().year,publicSettings=public_settings,siteName='Kenya Schools',siteUrl=site,companyName='Toror Technology and Innovations Limited',qrData='data:image/png;base64,'+b64encode(bio.getvalue()).decode(),metaTitle='Kenya Schools | Find Schools, Colleges & Universities',metaDescription='Find and compare schools, colleges and universities across Kenya. Explore institution profiles, locations, facilities, admissions and campus accommodation.',canonical=site+('/' if path=='/' else path),pageImage=site+'/images/kenya-schools-profile.jpg',heroCredit=photo_attribution(HERO_PHOTO['url']),isAdmin=bool(session.get('admin')),csrfToken=session.get('csrfToken',''),robots='index,follow',globalPromos=promos,structured_data={'@context':'https://schema.org','@type':'WebSite','name':'Kenya Schools','url':site,'description':'Find and compare schools, colleges and universities across Kenya.','publisher':{'@type':'Organization','name':'Toror Technology and Innovations Limited','url':site,'logo':site+'/images/kenya-schools-profile.jpg'},'potentialAction':{'@type':'SearchAction','target':site+'/schools?q={search_term_string}','query-input':'required name=search_term_string'}})
 def page(template,**kwargs):
  ctx=base_context(); ctx.update(kwargs)
  if template=='directory':
@@ -666,8 +749,64 @@ def submit_review(slug):
  audit('institution_review_submitted','review',None,f"Review submitted for school {school['id']}; awaiting moderation")
  return redirect('/school/'+slug+'?review=submitted#reviews')
 
+@app.get('/r/<code>')
+def referral_redirect(code):
+ code=safe(code,24).upper()
+ with conn() as c:partner=c.execute("SELECT code FROM referral_partners WHERE code=? AND status='active'",(code,)).fetchone()
+ if not partner:return redirect('/invite-and-earn?invalid=1')
+ response=redirect('/advertise')
+ response.set_cookie('schools_referral',referral_serializer.dumps(code),max_age=30*24*60*60,httponly=True,samesite='Lax',secure=PROD,path='/')
+ return response
+
+@app.route('/invite-and-earn',methods=['GET','POST'])
+@limiter.limit('5 per hour',methods=['POST'])
+def invite_and_earn():
+ if request.method=='GET':
+  return page('invite',registered=False,invalid=request.args.get('invalid')=='1',metaTitle='Invite & Earn KES 1,000 | Kenya Schools',metaDescription='Refer a new school to Kenya Schools and earn a KES 1,000 reward when it completes its first eligible paid advert.')
+ if safe(request.form.get('website_url'),150):return redirect('/invite-and-earn?registered=1')
+ name=safe(request.form.get('full_name'),120); phone=safe(request.form.get('phone'),50); email=safe(request.form.get('email'),160)
+ digits=normalise_contact(phone)
+ if len(digits)==9:phone='+254'+digits
+ if not name or len(digits)!=9 or digits[0] not in ('1','7'):
+  return page('invite',registered=False,error='Enter your name and a valid mobile number.',metaTitle='Invite & Earn KES 1,000 | Kenya Schools',metaDescription='Join the Kenya Schools referral programme.')
+ if request.form.get('accept_terms')!='1':
+  return page('invite',registered=False,error='Please read and accept the referral programme terms to continue.',metaTitle='Invite & Earn KES 1,000 | Kenya Schools',metaDescription='Join the Kenya Schools referral programme.')
+ code=secrets.token_hex(6).upper(); token=secrets.token_urlsafe(32); token_hash=sha256(token.encode()).hexdigest()
+ try:
+  with conn() as c:
+   prior=c.execute('SELECT phone FROM referral_partners').fetchall()
+   if any(normalise_contact(row['phone'])==digits for row in prior):raise sqlite3.IntegrityError('phone already registered')
+   c.execute('INSERT INTO referral_partners(full_name,phone,email,code,dashboard_token_hash,status,created_at) VALUES(?,?,?,?,?,?,?)',(name,phone,email,code,token_hash,'active',now()))
+ except sqlite3.IntegrityError:
+  return page('invite',registered=False,error='A referral profile already exists for this phone number. Use its saved private dashboard link, or contact the Kenya Schools team for help recovering access.',metaTitle='Invite & Earn KES 1,000 | Kenya Schools',metaDescription='Join the Kenya Schools referral programme.')
+ audit('referral_partner_registered','referrer',None,f'{name} registered a referral profile')
+ dashboard_url=current_site()+'/invite/dashboard/'+token
+ return page('invite',registered=True,referralLink=current_site()+'/r/'+code,dashboardUrl=dashboard_url,metaTitle='Your Kenya Schools Invite Link',metaDescription='Your referral profile is ready. Save your private dashboard link.')
+
+@app.get('/invite/dashboard/<token>')
+def invite_dashboard(token):
+ token=safe(token,100)
+ if len(token)<32:abort(404)
+ token_hash=sha256(token.encode()).hexdigest()
+ with conn() as c:
+  partner=c.execute("SELECT * FROM referral_partners WHERE dashboard_token_hash=?",(token_hash,)).fetchone()
+  if not partner:abort(404)
+  partner=dict(partner)
+  c.execute("UPDATE referral_rewards SET status='payable' WHERE status='pending_clearance' AND available_at<=?",(now(),))
+  referrals=[dict(x) for x in c.execute("SELECT sr.status,sr.created_at,sr.converted_at,s.name AS school_name,COALESCE(rr.status,'not_earned') AS reward_status,COALESCE(rr.amount_kes,0) AS reward_amount,rr.available_at,rr.paid_at FROM school_referrals sr JOIN schools s ON s.id=sr.school_id LEFT JOIN referral_rewards rr ON rr.referral_id=sr.id WHERE sr.referrer_id=? ORDER BY sr.id DESC LIMIT 100",(partner['id'],)).fetchall()]
+ summary=referral_reward_summary(partner['id'])
+ return page('invite-dashboard',partner=partner,summary=summary,referrals=referrals,referralLink=current_site()+'/r/'+partner['code'],metaTitle='Your Referral Dashboard | Kenya Schools',metaDescription='Track your Kenya Schools referrals and rewards.',robots='noindex,nofollow',canonical=current_site()+'/invite-and-earn')
+
 @app.get('/advertise')
-def advertise():return page('advertise',sent=request.args.get('sent')=='1')
+def advertise():
+ tier=request.args.get('tier','none')
+ tier=tier if tier in ('none','vip','vvip') else 'none'
+ try: days=int(request.args.get('days','30'))
+ except (TypeError,ValueError): days=30
+ days=days if days in PROMOTION_DURATIONS else 30
+ return page('advertise',sent=request.args.get('sent')=='1',referralApplied=bool(current_referral_partner()),
+  packagePrices=PROMOTION_PRICES,selectedTier=tier,selectedDuration=days,
+  submittedPrice=promotion_price(tier,days) if tier!='none' and request.args.get('sent')=='1' else None)
 @app.post('/advertise')
 @limiter.limit('8 per hour')
 def advertise_post():
@@ -686,13 +825,46 @@ def advertise_post():
   f.seek(0,2); size=f.tell(); f.seek(0)
   if size>8*1024*1024:return error_page('Image too large','Each photo must be 8MB or smaller.')
   fn=f"{int(time.time()*1000)}-{secrets.token_hex(5)}{ext}"; f.save(UPLOAD/fn); photos.append('/uploads/'+fn)
- account_id=get_or_create_customer(owner_name,owner_phone,request.form.get('email',''))
- slug=slugify(name)+'-'+secrets.token_hex(2); tier=request.form.get('requested_tier','none'); tier=tier if tier in ('none','vip','vvip') else 'none'; t=now()
- vals=[name,slug,safe(request.form.get('category'),30) or 'school',safe(request.form.get('ownership'),40),safe(request.form.get('levels'),150),safe(request.form.get('county'),80),safe(request.form.get('town'),80),safe(request.form.get('accommodation'),40),safe(request.form.get('gender'),40),safe(request.form.get('curriculum'),100),safe(request.form.get('fees_range'),100),safe(request.form.get('address'),250),safe(request.form.get('phone'),60),safe(request.form.get('email'),160),safe_url(request.form.get('website')),safe(request.form.get('description'),2500),photos[0] if photos else '',json.dumps(photos),safe_url(request.form.get('video_url')),tier,t,t,account_id]
- with conn() as c:c.execute("INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,fees_range,address,phone,email,website,description,cover_path,photos_json,video_url,trust_status,promotion_tier,requested_tier,status,source_note,is_seeded,created_at,updated_at,owner_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unverified','none',?,'pending','',0,?,?,?)",vals)
+ with conn() as c:account_rows=c.execute('SELECT id,phone FROM customer_accounts').fetchall()
+ existing_account=next((row for row in account_rows if normalise_contact(row['phone'])==normalise_contact(owner_phone)),None)
+ account_id=existing_account['id'] if existing_account else get_or_create_customer(owner_name,owner_phone,request.form.get('email',''))
+ slug=slugify(name)+'-'+secrets.token_hex(2); tier=request.form.get('requested_tier','none'); tier=tier if tier in ('none','vip','vvip') else 'none'
+ try: duration_days=int(request.form.get('promotion_duration_days','30'))
+ except (TypeError,ValueError): duration_days=30
+ duration_days=duration_days if duration_days in PROMOTION_DURATIONS else 30
+ package_amount=promotion_price(tier,duration_days) if tier!='none' else 0
+ t=now()
+ vals=[name,slug,safe(request.form.get('category'),30) or 'school',safe(request.form.get('ownership'),40),safe(request.form.get('levels'),150),safe(request.form.get('county'),80),safe(request.form.get('town'),80),safe(request.form.get('accommodation'),40),safe(request.form.get('gender'),40),safe(request.form.get('curriculum'),100),safe(request.form.get('fees_range'),100),safe(request.form.get('address'),250),safe(request.form.get('phone'),60),safe(request.form.get('email'),160),safe_url(request.form.get('website')),safe(request.form.get('description'),2500),photos[0] if photos else '',json.dumps(photos),safe_url(request.form.get('video_url')),tier,duration_days,t,t,account_id]
+ partner=current_referral_partner(); referral_id=None
+ # Only a genuinely new customer account can be attributed. Self-referrals are excluded.
+ self_referral=bool(partner and (normalise_contact(partner['phone'])==normalise_contact(owner_phone) or (partner['email'] and partner['email'].lower()==safe(request.form.get('email'),160).lower())))
  with conn() as c:
-  c.execute("INSERT INTO payment_records(account_id,purpose,tier,status,notes,created_at) VALUES(?,?,?,?,?,?)",(account_id,'Institution promotion',tier,'awaiting_quote','Package requested; confirm price and payment instructions with customer.',now())) if tier in ('vip','vvip') else None
- audit('school_submitted','school',None,name); return redirect('/advertise?sent=1')
+  cur=c.execute("INSERT INTO schools(name,slug,category,ownership,levels,county,town,accommodation,gender,curriculum,fees_range,address,phone,email,website,description,cover_path,photos_json,video_url,trust_status,promotion_tier,requested_tier,requested_duration_days,status,source_note,is_seeded,created_at,updated_at,owner_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'unverified','none',?,?,'pending','',0,?,?,?)",vals)
+  school_id=cur.lastrowid
+  prior_same_partner_account=False
+  if partner and existing_account:
+   prior_same_partner_account=bool(c.execute('SELECT id FROM school_referrals WHERE account_id=? AND referrer_id=? LIMIT 1',(account_id,partner['id'])).fetchone())
+  # A contact that was created by this same partner's first referral may submit
+  # another distinct institution. Existing accounts from before the programme
+  # are not eligible, and a contact can never be attributed to a second partner.
+  if partner and (not existing_account or prior_same_partner_account) and not self_referral:
+   duplicate=c.execute("SELECT id FROM schools WHERE id<>? AND lower(name)=lower(?) AND lower(county)=lower(?) AND status IN ('published','pending') LIMIT 1",(school_id,name,safe(request.form.get('county'),80))).fetchone()
+   if not duplicate:
+    # account_id is unique in this anti-abuse table. Link the first institution;
+    # further distinct schools from the same referred customer use NULL here.
+    prior_account_referral=c.execute('SELECT id FROM school_referrals WHERE account_id=? LIMIT 1',(account_id,)).fetchone()
+    referral_account_id=None if prior_account_referral else account_id
+    cur_ref=c.execute('INSERT INTO school_referrals(referrer_id,school_id,account_id,referral_code,status,created_at) VALUES(?,?,?,?,?,?)',(partner['id'],school_id,referral_account_id,partner['code'],'registered',now()))
+    referral_id=cur_ref.lastrowid
+  if tier in ('vip','vvip'):
+   package_label=f'{tier.upper()} · {duration_days} days · KES {package_amount:,}'
+   c.execute('INSERT INTO payment_records(account_id,school_id,referral_id,purpose,tier,duration_days,amount,status,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+    (account_id,school_id,referral_id,'Institution promotion',tier,duration_days,str(package_amount),'awaiting_payment',
+     f'{package_label}. Confirm the exact payment and M-PESA reference. Promotion activates after payment is confirmed and the institution profile is published.',now()))
+ audit('school_submitted','school',school_id,name)
+ response=redirect(f'/advertise?sent=1&tier={tier}&days={duration_days}')
+ response.delete_cookie('schools_referral',path='/')
+ return response
 @app.get('/school-portal')
 def portal():return page('portal',sent=request.args.get('sent')=='1')
 @app.post('/school-portal')
@@ -772,9 +944,14 @@ def admin_dashboard():
   visitor_paths=[dict(x) for x in c.execute("SELECT path,COUNT(*) AS hits,COUNT(DISTINCT visitor_key) AS visitors FROM visitor_events WHERE created_at>=? GROUP BY path ORDER BY hits DESC LIMIT 12",((datetime.now(timezone.utc)-timedelta(days=7)).isoformat(),)).fetchall()]
   visitor_days=[dict(x) for x in c.execute("SELECT date(created_at) AS day,COUNT(DISTINCT visitor_key) AS visitors,COUNT(*) AS views FROM visitor_events WHERE created_at>=? GROUP BY date(created_at) ORDER BY day DESC LIMIT 14",((datetime.now(timezone.utc)-timedelta(days=14)).isoformat(),)).fetchall()]
   accounts=[dict(x) for x in c.execute('SELECT * FROM customer_accounts ORDER BY id DESC LIMIT 30').fetchall()]
-  payments=[dict(x) for x in c.execute("SELECT p.*,a.full_name,a.phone,a.email FROM payment_records p LEFT JOIN customer_accounts a ON a.id=p.account_id ORDER BY p.id DESC LIMIT 30").fetchall()]
+  payments=[dict(x) for x in c.execute("SELECT p.*,a.full_name,a.phone,a.email,s.name AS school_name FROM payment_records p LEFT JOIN customer_accounts a ON a.id=p.account_id LEFT JOIN schools s ON s.id=p.school_id ORDER BY p.id DESC LIMIT 40").fetchall()]
+  c.execute("UPDATE referral_rewards SET status='payable' WHERE status='pending_clearance' AND available_at<=?",(now(),))
+  referrers=[dict(x) for x in c.execute("SELECT rp.*,COUNT(DISTINCT sr.id) AS referral_count,COUNT(DISTINCT CASE WHEN sr.status='converted' THEN sr.id END) AS converted_count,COALESCE(SUM(CASE WHEN rr.status IN ('pending_clearance','payable') THEN rr.amount_kes ELSE 0 END),0) AS unpaid_kes,COALESCE(SUM(CASE WHEN rr.status='paid' THEN rr.amount_kes ELSE 0 END),0) AS paid_kes FROM referral_partners rp LEFT JOIN school_referrals sr ON sr.referrer_id=rp.id LEFT JOIN referral_rewards rr ON rr.referral_id=sr.id GROUP BY rp.id ORDER BY rp.id DESC LIMIT 100").fetchall()]
+  referral_items=[dict(x) for x in c.execute("SELECT rr.*,rp.full_name AS referrer_name,rp.phone AS referrer_phone,s.name AS school_name,p.amount AS advert_amount,p.reference AS advert_reference FROM referral_rewards rr JOIN school_referrals sr ON sr.id=rr.referral_id JOIN referral_partners rp ON rp.id=sr.referrer_id JOIN schools s ON s.id=sr.school_id JOIN payment_records p ON p.id=rr.payment_record_id ORDER BY rr.id DESC LIMIT 100").fetchall()]
+  unconverted_referrals=[dict(x) for x in c.execute("SELECT sr.id,sr.created_at,rp.full_name AS referrer_name,rp.phone AS referrer_phone,s.name AS school_name,s.county FROM school_referrals sr JOIN referral_partners rp ON rp.id=sr.referrer_id JOIN schools s ON s.id=sr.school_id WHERE sr.status='registered' AND NOT EXISTS (SELECT 1 FROM payment_records p WHERE p.referral_id=sr.id AND p.purpose='Institution promotion' AND p.status NOT IN ('rejected','refunded')) ORDER BY sr.id DESC LIMIT 100").fetchall()]
+  referral_stats={'partners':c.execute('SELECT COUNT(*) FROM referral_partners').fetchone()[0],'referrals':c.execute('SELECT COUNT(*) FROM school_referrals').fetchone()[0],'converted':c.execute("SELECT COUNT(*) FROM school_referrals WHERE status='converted'").fetchone()[0],'pending_kes':c.execute("SELECT COALESCE(SUM(amount_kes),0) FROM referral_rewards WHERE status IN ('pending_clearance','payable')").fetchone()[0],'paid_kes':c.execute("SELECT COALESCE(SUM(amount_kes),0) FROM referral_rewards WHERE status='paid'").fetchone()[0]}
 
- ctx=base_context(); ctx.update(robots='noindex,nofollow',metaTitle='Admin Dashboard | Kenya Schools',schools=schools,properties=props,errors=errors,enquiries=enquiries,portalEnquiries=portals,contactMessages=messages,reviews=reviews,stats=stats,settings=settings,visitorPaths=visitor_paths,visitorDays=visitor_days,payments=payments,accounts=accounts); return render_template('admin-dashboard.html',**ctx)
+ ctx=base_context(); ctx.update(robots='noindex,nofollow',metaTitle='Admin Dashboard | Kenya Schools',schools=schools,properties=props,errors=errors,enquiries=enquiries,portalEnquiries=portals,contactMessages=messages,reviews=reviews,stats=stats,settings=settings,visitorPaths=visitor_paths,visitorDays=visitor_days,payments=payments,accounts=accounts,referrers=referrers,referralItems=referral_items,unconvertedReferrals=unconverted_referrals,referralStats=referral_stats); return render_template('admin-dashboard.html',**ctx)
 def admin_action(sql,args,action,typ,rid,detail=''):
  r=admin_guard()
  if r:return r
@@ -819,9 +996,36 @@ def school_edit(rid):
  audit('institution_profile_edited','school',rid,name)
  return redirect('/admin#institutions')
 
+def sync_paid_promotion(c, school_id):
+ school=c.execute('SELECT status FROM schools WHERE id=?',(school_id,)).fetchone()
+ if not school or school['status']!='published': return
+ payment=c.execute("SELECT tier,duration_days,paid_at,created_at FROM payment_records WHERE school_id=? AND purpose='Institution promotion' AND status='paid' AND tier IN ('vip','vvip') ORDER BY COALESCE(NULLIF(paid_at,''),created_at) DESC,id DESC LIMIT 1",(school_id,)).fetchone()
+ if not payment:
+  c.execute("UPDATE schools SET promotion_tier='none',promotion_expires_at='',updated_at=? WHERE id=?",(now(),school_id)); return
+ try: days=int(payment['duration_days'] or 30)
+ except (TypeError,ValueError): days=30
+ if days not in PROMOTION_DURATIONS: days=30
+ start_value=payment['paid_at'] or payment['created_at']
+ try: start=datetime.fromisoformat(start_value)
+ except (TypeError,ValueError): start=datetime.now(timezone.utc)
+ if start.tzinfo is None: start=start.replace(tzinfo=timezone.utc)
+ expires=(start+timedelta(days=days)).astimezone(timezone.utc)
+ if expires<=datetime.now(timezone.utc):
+  c.execute("UPDATE schools SET promotion_tier='none',promotion_expires_at='',updated_at=? WHERE id=?",(now(),school_id)); return
+ c.execute('UPDATE schools SET promotion_tier=?,promotion_expires_at=?,last_featured_at=?,updated_at=? WHERE id=?',
+  (payment['tier'],expires.isoformat(),now(),now(),school_id))
+
 @app.post('/admin/schools/<int:rid>/approve')
 def school_approve(rid):
- t=now(); exp=(datetime.now(timezone.utc)+timedelta(days=30)).isoformat(); return admin_action("UPDATE schools SET status='published',posted_at=?,expires_at=?,last_renewed_at=?,updated_at=? WHERE id=?",(t,exp,t,t,rid),'school_approved','school',rid,'Published for 30 days')
+ r=admin_guard()
+ if r:return r
+ t=now(); exp=(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()
+ with conn() as c:
+  cur=c.execute("UPDATE schools SET status='published',posted_at=?,expires_at=?,last_renewed_at=?,updated_at=? WHERE id=?",(t,exp,t,t,rid))
+  if not cur.rowcount:abort(404)
+  sync_paid_promotion(c,rid)
+ audit('school_approved','school',rid,'Published for 30 days; any paid promotion activated for its selected duration')
+ return redirect('/admin#institutions')
 @app.post('/admin/schools/<int:rid>/renew')
 def school_renew(rid):
  t=now(); exp=(datetime.now(timezone.utc)+timedelta(days=30)).isoformat(); return admin_action("UPDATE schools SET status='published',expires_at=?,last_renewed_at=?,updated_at=? WHERE id=?",(exp,t,t,rid),'school_renewed','school',rid,'Renewed for 30 days')
@@ -925,9 +1129,13 @@ def admin_restore():
   # Bring older valid backups forward to the current schema without discarding records.
   with conn() as c:
    c.executescript(SCHEMA)
-   for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'"),('schools','owner_account_id',"INTEGER"),('properties','owner_account_id',"INTEGER")]:
+   for table,col,definition in [('schools','photos_json',"TEXT DEFAULT '[]'"),('schools','promotion_expires_at',"TEXT DEFAULT ''"),('schools','requested_tier',"TEXT DEFAULT 'none'"),('schools','requested_duration_days','INTEGER NOT NULL DEFAULT 30'),('schools','owner_account_id',"INTEGER"),('properties','owner_account_id',"INTEGER"),('payment_records','school_id',"INTEGER"),('payment_records','referral_id',"INTEGER"),('payment_records','duration_days','INTEGER NOT NULL DEFAULT 30'),('payment_records','paid_at',"TEXT DEFAULT ''")]:
     cols=[r['name'] for r in c.execute(f'PRAGMA table_info({table})')]
     if col not in cols:c.execute(f'ALTER TABLE {table} ADD COLUMN {col} {definition}')
+   c.execute("""UPDATE payment_records
+    SET amount=CASE tier WHEN 'vip' THEN CASE duration_days WHEN 30 THEN '3000' WHEN 60 THEN '5500' WHEN 90 THEN '7500' END WHEN 'vvip' THEN CASE duration_days WHEN 30 THEN '6000' WHEN 60 THEN '11000' WHEN 90 THEN '15000' END ELSE amount END,
+     status='awaiting_payment',notes=COALESCE(notes,'') || ' Updated to the published fixed advertising tariff.'
+    WHERE purpose='Institution promotion' AND tier IN ('vip','vvip') AND status='awaiting_quote' AND (amount IS NULL OR TRIM(amount)='')""")
   for name,encoded in media.items():
    safe_name=secure_filename(name)
    if safe_name and len(safe_name)<180:
@@ -946,9 +1154,86 @@ def admin_payment_update(rid):
  status=safe(request.form.get('status'),30)
  if status not in ('awaiting_quote','awaiting_payment','paid','rejected','refunded','awaiting_review'):return error_page('Invalid payment status','Choose a valid payment status.')
  amount=safe(request.form.get('amount'),80); reference=safe(request.form.get('reference'),120); notes=safe(request.form.get('notes'),500)
- with conn() as c:c.execute('UPDATE payment_records SET status=?,amount=?,reference=?,notes=? WHERE id=?',(status,amount,reference,notes,rid))
+ if status=='paid':
+  try: paid_amount=float(amount.replace(',',''))
+  except (TypeError,ValueError):paid_amount=0
+  if paid_amount<=0 or not reference:return error_page('Payment confirmation incomplete','To mark a payment as paid, enter the confirmed amount and the M-PESA transaction reference or other verifiable receipt number.')
+ with conn() as c:
+  payment=c.execute('SELECT * FROM payment_records WHERE id=?',(rid,)).fetchone()
+  if not payment:abort(404)
+  if status=='paid' and payment['purpose']=='Institution promotion' and payment['tier'] in ('vip','vvip'):
+   expected=promotion_price(payment['tier'],payment['duration_days'] or 30)
+   if expected is None:
+    return error_page('Invalid advert duration','This payment record has an invalid advertising term. Recreate the payment record using 30, 60 or 90 days.')
+   if round(paid_amount,2)!=float(expected):
+    return error_page('Advert amount does not match the selected package',f"This {payment['tier'].upper()} advert is priced at KES {expected:,.0f} for {int(payment['duration_days'] or 30)} days. Confirm the exact amount received before marking it paid.")
+  paid_at=((payment['paid_at'] or now()) if payment['status']=='paid' else now()) if status=='paid' else (payment['paid_at'] or '')
+  c.execute('UPDATE payment_records SET status=?,amount=?,reference=?,notes=?,paid_at=? WHERE id=?',(status,amount,reference,notes,paid_at,rid))
+  if payment['school_id'] and payment['purpose']=='Institution promotion':
+   sync_paid_promotion(c,payment['school_id'])
+  if status=='refunded' and payment['referral_id']:
+   reward=c.execute('SELECT id,status FROM referral_rewards WHERE referral_id=?',(payment['referral_id'],)).fetchone()
+   if reward:
+    new_status='reversal_review' if reward['status']=='paid' else 'void'
+    c.execute('UPDATE referral_rewards SET status=?,notes=? WHERE id=?',(new_status,'The qualifying advert payment was refunded; administrator review required.',reward['id']))
+   c.execute("UPDATE school_referrals SET status='registered',converted_at='' WHERE id=?",(payment['referral_id'],))
+  elif status=='paid' and payment['purpose']=='Institution promotion' and payment['tier'] in ('vip','vvip') and payment['referral_id']:
+   existing=c.execute('SELECT id,payment_record_id,status FROM referral_rewards WHERE referral_id=?',(payment['referral_id'],)).fetchone()
+   earned=now(); available=(datetime.now(timezone.utc)+timedelta(days=7)).isoformat()
+   if not existing:
+    c.execute("INSERT INTO referral_rewards(referral_id,payment_record_id,amount_kes,status,earned_at,available_at,notes) VALUES(?,?,?,?,?,?,?)",(payment['referral_id'],rid,1000,'pending_clearance',earned,available,'Eligible after seven days, provided the advert payment is not refunded or reversed.'))
+   elif existing['status']=='void' and existing['payment_record_id']!=rid:
+    c.execute("UPDATE referral_rewards SET payment_record_id=?,amount_kes=1000,status='pending_clearance',earned_at=?,available_at=?,paid_at='',payout_reference='',notes=? WHERE id=?",(rid,earned,available,'A new eligible advert payment replaced a previously refunded payment; seven-day clearance restarted.',existing['id']))
+   c.execute("UPDATE school_referrals SET status='converted',converted_at=? WHERE id=?",(now(),payment['referral_id']))
  audit('payment_record_updated','payment',rid,status)
+ if status=='paid' and payment['referral_id']:audit('referral_reward_qualified','referral',payment['referral_id'],'KES 1,000 platform-funded reward; seven-day clearance started')
+ if status=='refunded' and payment['referral_id']:audit('referral_reward_reviewed','referral',payment['referral_id'],'Qualifying advert refunded; reward voided or flagged for reversal review')
+ return redirect('/admin#referrals')
+
+@app.post('/admin/referrals/<int:rid>/advert-payment')
+def referral_advert_payment_create(rid):
+ r=admin_guard()
+ if r:return r
+ tier=request.form.get('tier','vip')
+ if tier not in ('vip','vvip'):return error_page('Invalid advert package','Choose VIP or VVIP for an eligible paid promotion.')
+ try: days=int(request.form.get('duration_days','30'))
+ except (TypeError,ValueError):days=30
+ if days not in PROMOTION_DURATIONS:days=30
+ amount=promotion_price(tier,days)
+ with conn() as c:
+  referral=c.execute("SELECT sr.*,s.owner_account_id,s.name FROM school_referrals sr JOIN schools s ON s.id=sr.school_id WHERE sr.id=? AND sr.status='registered'",(rid,)).fetchone()
+  if not referral:abort(404)
+  existing=c.execute("SELECT id FROM payment_records WHERE referral_id=? AND purpose='Institution promotion' AND status NOT IN ('rejected','refunded') LIMIT 1",(rid,)).fetchone()
+  if existing:return error_page('Advert payment already exists','This referred institution already has an open or confirmed advert payment record. Update that record in the Payments section instead.')
+  c.execute("INSERT INTO payment_records(account_id,school_id,referral_id,purpose,tier,duration_days,amount,status,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",(referral['owner_account_id'],referral['school_id'],rid,'Institution promotion',tier,days,str(amount),'awaiting_payment',f'{tier.upper()} · {days} days · KES {amount:,}. Confirm the exact payment reference before marking paid.',now()))
+ audit('referral_advert_payment_created','referral',rid,f'{tier} advert payment record created for {referral["name"]}')
  return redirect('/admin#payments')
+
+@app.post('/admin/referral-rewards/<int:rid>/pay')
+def referral_reward_pay(rid):
+ r=admin_guard()
+ if r:return r
+ payout_ref=safe(request.form.get('payout_reference'),120)
+ if not payout_ref:return error_page('Payout reference required','Enter the M-PESA transaction code or verifiable payout reference before marking a reward paid.')
+ with conn() as c:
+  reward=c.execute('SELECT * FROM referral_rewards WHERE id=?',(rid,)).fetchone()
+  if not reward:abort(404)
+  if reward['status']=='pending_clearance' and reward['available_at']<=now():c.execute("UPDATE referral_rewards SET status='payable' WHERE id=?",(rid,))
+  reward=c.execute('SELECT * FROM referral_rewards WHERE id=?',(rid,)).fetchone()
+  if reward['status']!='payable':return error_page('Reward is not payable yet','Only rewards that have completed the seven-day clearance period can be paid.')
+  c.execute("UPDATE referral_rewards SET status='paid',paid_at=?,payout_reference=? WHERE id=?",(now(),payout_ref,rid))
+ audit('referral_reward_paid','referral_reward',rid,'KES 1,000 paid; reference '+payout_ref)
+ return redirect('/admin#referrals')
+
+@app.post('/admin/referrers/<int:rid>/status')
+def referral_partner_status(rid):
+ r=admin_guard()
+ if r:return r
+ status=request.form.get('status','paused')
+ if status not in ('active','paused'):return error_page('Invalid referral status','Choose active or paused.')
+ with conn() as c:c.execute('UPDATE referral_partners SET status=? WHERE id=?',(status,rid))
+ audit('referral_partner_status_changed','referrer',rid,status)
+ return redirect('/admin#referrals')
 
 @app.post('/admin/errors/clear')
 def clear_errors():return admin_action('DELETE FROM admin_errors',(),'admin_error_log_cleared','admin',None)
@@ -957,7 +1242,7 @@ def sitemap():
  with conn() as c:
   rows=c.execute("SELECT slug,updated_at FROM schools WHERE status='published' AND (expires_at='' OR expires_at IS NULL OR expires_at>?)",(now(),)).fetchall()
   counties=[r[0] for r in c.execute("SELECT county FROM schools WHERE status='published' AND county<>'' AND (expires_at='' OR expires_at IS NULL OR expires_at>?) GROUP BY county HAVING COUNT(*)>=3 ORDER BY county",(now(),)).fetchall()]
- fixed=['/','/schools','/directory/school','/directory/college','/directory/university','/advertise','/school-portal','/campus-living','/about','/privacy','/contact','/help']+[f'/schools-in-{slugify(x)}' for x in counties]
+ fixed=['/','/schools','/directory/school','/directory/college','/directory/university','/advertise','/school-portal','/campus-living','/invite-and-earn','/about','/privacy','/contact','/help']+[f'/schools-in-{slugify(x)}' for x in counties]
  origin=current_site(); urls=''.join(f'<url><loc>{origin}{u}</loc></url>' for u in fixed)+''.join(f'<url><loc>{origin}/school/{r["slug"]}</loc><lastmod>{r["updated_at"][:10]}</lastmod></url>' for r in rows)
  return app.response_class('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'+urls+'</urlset>',mimetype='application/xml')
 @app.get('/robots.txt')

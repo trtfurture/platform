@@ -2,9 +2,18 @@
 {% include 'partials/header.html' %}
 {% include 'partials/promo-strip.html' %}
 <main>
-  <section class="page-hero page-hero-business"><div class="container"><div class="eyebrow">FOR Kenya Schools, COLLEGES & UNIVERSITIES</div><h1>Put your institution<br>in the spotlight.</h1><p>Show people what makes your campus special. Share your facilities, admissions information, photos and video tours with people exploring education in Kenya.</p><a href="#school-form" class="button button-primary">Create your listing </a></div></section>
-  <section class="container section business-layout"><div class="business-copy"><div class="eyebrow">HOW IT WORKS</div><h2>Your institution.<br>Your story. Your audience.</h2><div class="steps-list"><div><b>01</b><span><strong>Submit your profile</strong><small>Tell us about your institution, location and programmes.</small></span></div><div><b>02</b><span><strong>Our team reviews it</strong><small>We check the information and contact details before publication.</small></span></div><div><b>03</b><span><strong>Choose visibility</strong><small>Request a standard listing, VIP or VVIP promotion after approval.</small></span></div><div><b>04</b><span><strong>Stay up to date</strong><small>Published owner-submitted listings are renewed every 30 days.</small></span></div></div><div class="note-strip compact"><p>Our team reviews each listing and follows up about any promotion you request.</p></div></div>
-    <form class="form-card" id="school-form" action="/advertise" method="post" enctype="multipart/form-data"><div class="eyebrow">INSTITUTION SUBMISSION</div><h2>Tell us about your institution</h2>{% if publicSettings.get("payment_instructions") or publicSettings.get("mpesa_paybill") or publicSettings.get("mpesa_till") %}<div class="note-strip compact"><p><strong>Payment information:</strong> {{ publicSettings.get("payment_instructions") }}{% if publicSettings.get("mpesa_paybill") %} Paybill {{ publicSettings.get("mpesa_paybill") }}{% endif %}{% if publicSettings.get("mpesa_till") %} · Till {{ publicSettings.get("mpesa_till") }}{% endif %}{% if publicSettings.get("mpesa_account") %} · Account {{ publicSettings.get("mpesa_account") }}{% endif %}</p></div>{% endif %}{% if sent %}<div class="success-message">Your submission has been received for review.</div>{% endif %}
+  <section class="page-hero page-hero-business"><div class="container"><div class="eyebrow">FOR Kenya Schools, COLLEGES & UNIVERSITIES</div><h1>Put your institution<br>in the spotlight.</h1><p>Show people what makes your campus special. Share your facilities, admissions information, photos and video tours with people exploring education in Kenya.</p><a href="#packages" class="button button-primary">View advertising packages</a> <a href="#school-form" class="button button-light">Submit your institution</a></div></section>
+  <section class="container section pricing-section" id="packages">
+    <div class="pricing-heading"><div><div class="eyebrow">CLEAR ADVERTISING PRICES</div><h2>Choose how prominently to be featured.</h2><p>Every institution can start with a free standard listing. Paid packages add clearly labelled sponsored visibility; choose the duration that suits your campaign.</p></div><div class="pricing-note"><strong>No hidden referral fee.</strong><span>The displayed price is the school's price. Referral rewards are funded by Kenya Schools, not added to your bill.</span></div></div>
+    <div class="pricing-grid">
+      <article class="pricing-card standard-price-card"><div class="pricing-card-top"><span class="pricing-label">STANDARD</span><span class="pricing-price">Free</span><small>Directory listing</small></div><ul><li>Institution profile in the directory</li><li>Location, programmes and contact details</li><li>Subject to profile review and approval</li></ul><a class="button button-outline full-width" href="#school-form" data-select-package="none">Start free listing</a></article>
+      <article class="pricing-card vip-price-card"><div class="pricing-card-top"><span class="pricing-label">VIP</span><span class="pricing-price">From KES 3,000</span><small>Sponsored directory visibility</small></div><ul><li>Higher placement in relevant directory results</li><li>Visible VIP sponsored label</li><li>Ideal for schools seeking more discovery</li></ul><div class="price-duration-list"><div><span>30 days</span><strong>KES {{ '{:,.0f}'.format(packagePrices['vip'][30]) }}</strong></div><div><span>60 days</span><strong>KES {{ '{:,.0f}'.format(packagePrices['vip'][60]) }}</strong></div><div><span>90 days</span><strong>KES {{ '{:,.0f}'.format(packagePrices['vip'][90]) }}</strong></div></div><a class="button button-outline full-width" href="#school-form" data-select-package="vip">Choose VIP</a></article>
+      <article class="pricing-card vvip-price-card"><div class="pricing-card-top"><span class="pricing-label">VVIP · FEATURED</span><span class="pricing-price">From KES 6,000</span><small>Premium cross-platform visibility</small></div><ul><li>VIP directory placement benefits</li><li>Homepage featured spotlight rotation</li><li>Featured visibility across relevant platform pages</li><li>Clearly labelled VVIP sponsored placement</li></ul><div class="price-duration-list"><div><span>30 days</span><strong>KES {{ '{:,.0f}'.format(packagePrices['vvip'][30]) }}</strong></div><div><span>60 days</span><strong>KES {{ '{:,.0f}'.format(packagePrices['vvip'][60]) }}</strong></div><div><span>90 days</span><strong>KES {{ '{:,.0f}'.format(packagePrices['vvip'][90]) }}</strong></div></div><a class="button button-dark full-width" href="#school-form" data-select-package="vvip">Choose VVIP</a></article>
+    </div>
+    <p class="pricing-footnote">Prices are in Kenya shillings (KES). Paid visibility starts after payment is confirmed and the institution profile is approved and published. Featured placement is rotational and does not guarantee a specific number of visits or enquiries.</p>
+  </section>
+  <section class="container section business-layout"><div class="business-copy"><div class="eyebrow">HOW IT WORKS</div><h2>Your institution.<br>Your story. Your audience.</h2><div class="steps-list"><div><b>01</b><span><strong>Submit your profile</strong><small>Tell us about your institution, location and programmes.</small></span></div><div><b>02</b><span><strong>Our team reviews it</strong><small>We check the information and contact details before publication.</small></span></div><div><b>03</b><span><strong>Choose visibility</strong><small>Keep the free standard listing or select VIP/VVIP and a 30, 60 or 90-day term. Prices are shown before you submit.</small></span></div><div><b>04</b><span><strong>Stay up to date</strong><small>Published owner-submitted listings are renewed every 30 days.</small></span></div></div><div class="note-strip compact"><p>Our team reviews each listing and follows up about any promotion you request.</p></div></div>
+    <form class="form-card" id="school-form" action="/advertise" method="post" enctype="multipart/form-data"><div class="eyebrow">INSTITUTION SUBMISSION</div><h2>Tell us about your institution</h2>{% if publicSettings.get("payment_instructions") or publicSettings.get("mpesa_paybill") or publicSettings.get("mpesa_till") %}<div class="note-strip compact"><p><strong>Payment information:</strong> {{ publicSettings.get("payment_instructions") }}{% if publicSettings.get("mpesa_paybill") %} Paybill {{ publicSettings.get("mpesa_paybill") }}{% endif %}{% if publicSettings.get("mpesa_till") %} · Till {{ publicSettings.get("mpesa_till") }}{% endif %}{% if publicSettings.get("mpesa_account") %} · Account {{ publicSettings.get("mpesa_account") }}{% endif %}</p></div>{% endif %}{% if sent %}{% if submittedPrice %}<div class="success-message"><strong>Your institution submission has been received.</strong><br>Your {{ selectedTier|upper }} package request: KES {{ '{:,.0f}'.format(submittedPrice) }} for {{ selectedDuration }} days. Our team will review the profile. The paid visibility begins after payment is confirmed and the profile is approved and published.</div>{% else %}<div class="success-message"><strong>Your standard listing submission has been received.</strong><br>Standard directory listings are free and are published after review and approval.</div>{% endif %}{% endif %}{% if referralApplied %}<div class="note-strip compact referral-notice"><p><strong>Referral link recognised.</strong> The referring partner may qualify for a platform-funded KES 1,000 reward if your institution completes its first eligible paid promotion. This does not add a referral fee or increase your advert price.</p></div>{% endif %}
       <label>Institution name *<input name="name" required maxlength="160" placeholder="e.g. Greenfield Academy"></label>
       <div class="form-row"><label>Account holder / contact person *<input name="contact_name" required maxlength="120" placeholder="Your full name"></label><label>Account phone *<input name="phone" required placeholder="+254..."></label></div>
       <div class="form-row"><label>Institution type<select name="category"><option value="school">School</option><option value="college">College / TVET</option><option value="university">University</option></select></label><label>Ownership<select name="ownership"><option value="Private">Private</option><option value="Public">Public</option><option value="Other">Other</option></select></label></div>
@@ -18,10 +27,46 @@
       <label>Official website<input name="website" placeholder="https://..."></label>
       <label>Campus video link <small>(YouTube or Vimeo link)</small><input name="video_url" placeholder="https://..."></label>
       <label>Campus photographs <small>(JPG, PNG or WebP · up to 6 photos · 8MB each)</small><input type="file" name="photos" accept="image/jpeg,image/png,image/webp" multiple></label>
-      <label>Visibility package you are interested in<select name="requested_tier"><option value="none">Standard listing</option><option value="vip">VIP · Green promotion</option><option value="vvip">VVIP · Gold promotion</option></select><small>Requesting a package is not payment or approval. We will confirm pricing and payment before promotion.</small></label>
+      <div class="form-row package-choice-row"><label>Visibility package<select id="requested-tier" name="requested_tier"><option value="none" {{ 'selected' if selectedTier=='none' else '' }}>Standard listing · Free</option><option value="vip" {{ 'selected' if selectedTier=='vip' else '' }}>VIP · Sponsored directory visibility</option><option value="vvip" {{ 'selected' if selectedTier=='vvip' else '' }}>VVIP · Featured visibility</option></select></label><label>Promotion duration<select id="promotion-duration" name="promotion_duration_days">{% for days in [30,60,90] %}<option value="{{ days }}" {{ 'selected' if selectedDuration==days else '' }}>{{ days }} days</option>{% endfor %}</select></label></div>
+      <div class="package-price-preview" id="package-price-preview" aria-live="polite"><span>Package price</span><strong>Free standard listing</strong><small>Choose VIP or VVIP to add sponsored visibility.</small></div>
+      <small class="form-footnote">The price shown is the full package price. Submitting a VIP/VVIP request records the selected package and duration; it does not charge you online. Our team confirms the payment instructions. No extra referral fee is added.</small>
       <label class="honeypot" aria-hidden="true">Leave this field empty<input name="website_confirm" tabindex="-1" autocomplete="off"></label>
       <label class="consent-check"><input type="checkbox" required> I confirm that I am authorised to submit this information and have permission to share any uploaded images.</label>
       <button class="button button-dark full-width" type="submit">Submit institution for review</button><small class="form-footnote">We review submissions before publication. Sponsored placements are clearly labelled. Only upload photographs you have permission to share.</small>
     </form></section>
 </main>
+<script type="application/json" id="package-prices">{{ packagePrices|tojson }}</script>
+<script>
+(function () {
+  const tier = document.getElementById('requested-tier');
+  const duration = document.getElementById('promotion-duration');
+  const preview = document.getElementById('package-price-preview');
+  const raw = document.getElementById('package-prices');
+  if (!tier || !duration || !preview || !raw) return;
+  let prices = {};
+  try { prices = JSON.parse(raw.textContent || '{}'); } catch (_) { return; }
+  function renderPrice() {
+    const selectedTier = tier.value;
+    const days = Number(duration.value);
+    const price = (prices[selectedTier] || {})[String(days)];
+    if (selectedTier === 'none' || !price) {
+      preview.innerHTML = '<span>Package price</span><strong>Free standard listing</strong><small>Choose VIP or VVIP to add sponsored visibility.</small>';
+      duration.disabled = true;
+      return;
+    }
+    duration.disabled = false;
+    preview.innerHTML = '<span>Selected package</span><strong>KES ' + Number(price).toLocaleString('en-KE') + '</strong><small>' + selectedTier.toUpperCase() + ' sponsored visibility · ' + days + ' days · no online charge at submission</small>';
+  }
+  tier.addEventListener('change', renderPrice);
+  duration.addEventListener('change', renderPrice);
+  document.querySelectorAll('[data-select-package]').forEach(function (link) {
+    link.addEventListener('click', function () {
+      tier.value = link.getAttribute('data-select-package') || 'none';
+      if (tier.value !== 'none') duration.disabled = false;
+      renderPrice();
+    });
+  });
+  renderPrice();
+})();
+</script>
 {% include 'partials/footer.html' %}

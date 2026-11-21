@@ -1,0 +1,39 @@
+{% include 'partials/head.html' %}
+{% include 'partials/header.html' %}
+{% include 'partials/promo-strip.html' %}
+<main>
+{% if registered %}
+  <section class="invite-success-wrap"><div class="container invite-success-card">
+    <div class="invite-icon">✓</div><div class="eyebrow">YOU'RE IN</div><h1>Your invite link is ready.</h1>
+    <p>Share your unique Kenya Schools link with school owners and administrators. Your KES 1,000 reward is earned when a genuinely new institution you refer completes its first eligible paid advert and the payment is confirmed.</p>
+    <label class="invite-field-label">Your shareable invite link</label><div class="copy-link-row"><input id="invite-link" readonly value="{{ referralLink }}"><button class="button button-dark" type="button" data-copy-target="invite-link">Copy link</button></div>
+    <div class="invite-private-warning"><strong>Save your private dashboard link.</strong><span>This is your personal access key. Keep it private and do not share it with invitees. It is shown only once here.</span></div>
+    <label class="invite-field-label" for="dashboard-link">Private dashboard address</label><div class="copy-link-row"><input id="dashboard-link" readonly value="{{ dashboardUrl }}"><button class="button button-dark" type="button" data-copy-target="dashboard-link">Copy private link</button></div>
+    <a class="button button-primary full-width" href="{{ dashboardUrl }}">Open my referral dashboard</a>
+    <p class="invite-small">Save your private dashboard address somewhere secure. If you lose it, contact the platform team to verify your identity and request help.</p>
+  </div></section>
+{% else %}
+  <section class="invite-hero"><div class="container invite-hero-inner"><div class="eyebrow light">KENYA SCHOOLS PARTNER PROGRAMME</div><h1>Know a school?<br><em>Earn KES 1,000.</em></h1><p>Help more Kenyan institutions get discovered. Share your personal link with a school owner or administrator and earn a platform-funded reward when their first eligible paid advert is confirmed.</p><div class="invite-hero-points"><span>One reward per new institution</span><span>No cost to the school</span><span>Track progress privately</span></div></div></section>
+  <section class="container invite-content section">
+    <div class="invite-how"><div class="eyebrow">STRAIGHTFORWARD REWARDS</div><h2>Three steps. One clear rule.</h2>
+      <div class="invite-steps"><div><b>01</b><span><strong>Join the programme</strong><small>Register your name and M-PESA number. We create a unique invite link for you.</small></span></div><div><b>02</b><span><strong>Invite a new institution</strong><small>Share the link with a school, college or university that is not already an advertiser on the platform.</small></span></div><div><b>03</b><span><strong>Earn KES 1,000</strong><small>When the institution completes its first eligible VIP or VVIP advert payment, your reward enters a seven-day clearance period.</small></span></div></div>
+      <div class="invite-terms"><h3>Programme rules</h3><ul><li>The reward is KES 1,000 for one genuinely new institution, not for each click, account or form submission. A school already submitted to the platform, an existing advertiser/customer account, or your own institution is not eligible as a new referral.</li><li>The institution must open your invite link and submit its first-time listing within 30 days, then pay for its first eligible VIP or VVIP promotion. Standard directory listings do not trigger a reward. The same newly referred administrator may submit other distinct institutions through the same partner, but existing advertiser accounts and duplicate institution entries do not qualify.</li><li>Payment must be confirmed by Kenya Schools using a valid transaction reference. A screenshot or promise to pay is not confirmation.</li><li>If more than one partner link is opened before the institution submits its listing, the most recently opened valid link is attributed. There is a seven-day clearance period after payment confirmation. Refunds, reversals, duplicate institutions, self-referrals, false details and abuse are excluded.</li><li>Rewards are paid manually by M-PESA to the registered phone number after clearance and administrator verification.</li><li>Rewards are funded by Kenya Schools from its advertising revenue. The referred institution is not charged an extra referral fee.</li><li>Kenya Schools may pause or investigate suspicious referral activity. Any change to reward terms will apply prospectively and be communicated on this page.</li></ul><p>Referral rewards may have tax implications. Any applicable tax treatment or withholding will be handled as required by Kenyan law.</p></div>
+    </div>
+    <form class="form-card invite-register-card" action="/invite-and-earn" method="post"><div class="eyebrow">BECOME A REFERRAL PARTNER</div><h2>Get your invite link</h2><p class="muted">Use a mobile number you control. This is where your reward will be sent.</p>
+      {% if invalid %}<div class="note-strip compact"><p>This invite code is not active. You can still join the programme and get your own link.</p></div>{% endif %}
+      {% if error %}<div class="error-message">{{ error }}</div>{% endif %}
+      <label>Your full name *<input name="full_name" required maxlength="120" autocomplete="name" placeholder="Your name"></label>
+      <label>M-PESA phone number *<input name="phone" required maxlength="50" autocomplete="tel" placeholder="e.g. 07XX XXX XXX"></label>
+      <label>Email address <small>(optional)</small><input type="email" name="email" maxlength="160" autocomplete="email" placeholder="you@example.com"></label>
+      <label class="honeypot" aria-hidden="true">Leave empty<input name="website_url" tabindex="-1" autocomplete="off"></label>
+      <label class="consent-check invite-consent"><input type="checkbox" name="accept_terms" value="1" required> I have read and accept the referral programme rules. I understand Kenya Schools will use my name and contact details to administer referrals and reward payments, as explained in the <a href="/privacy" target="_blank" rel="noopener">privacy notice</a>.</label>
+      <button class="button button-dark full-width" type="submit">Create my referral link</button>
+      <small class="form-footnote">Your private dashboard access link is shown once after registration. Save it securely.</small>
+    </form>
+  </section>
+{% endif %}
+</main>
+<script>
+document.addEventListener('click',function(event){const button=event.target.closest('[data-copy-target]');if(!button)return;const field=document.getElementById(button.dataset.copyTarget);if(!field)return;field.select();field.setSelectionRange(0,99999);if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(field.value).then(()=>{button.textContent='Copied';}).catch(()=>{button.textContent='Select and copy';});}else{document.execCommand('copy');button.textContent='Copied';}});
+</script>
+{% include 'partials/footer.html' %}
